@@ -41,9 +41,9 @@ from modeling_outputs import (
     Seq2SeqQuestionAnsweringModelOutput,
     Seq2SeqSequenceClassifierOutput,
 )
-from .modeling_utils import PreTrainedModel
-from .utils import logging
-from .configuration_bart import BartConfig
+from modeling_utils import PreTrainedModel
+from utils import logging
+from configuration_bart import BartConfig
 
 
 logger = logging.get_logger(__name__)

@@ -21,10 +21,10 @@ import json
 import os
 from typing import Any, Dict, Tuple, Union
 
-from . import __version__
-from .file_utils import CONFIG_NAME, PushToHubMixin, cached_path, hf_bucket_url, is_offline_mode, is_remote_url
-from .utils import logging
+from file_utils import CONFIG_NAME, PushToHubMixin, cached_path, hf_bucket_url, is_offline_mode, is_remote_url
+from utils import logging
 
+__version__ = '4.9.0.dev0'
 
 logger = logging.get_logger(__name__)
 

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from file_utils import _LazyModule, is_flax_available, is_tf_available, is_tokenizers_available, is_torch_available
 
+__version__ = "4.9.0.dev0"
 
 _import_structure = {
     "configuration_bart": ["BART_PRETRAINED_CONFIG_ARCHIVE_MAP", "BartConfig", "BartOnnxConfig"],

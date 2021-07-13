@@ -22,9 +22,9 @@ import torch
 import torch.distributed as dist
 from torch import nn
 
-from .file_utils import ModelOutput
-from .generation_beam_search import BeamScorer, BeamSearchScorer
-from .generation_logits_process import (
+from file_utils import ModelOutput
+from generation_beam_search import BeamScorer, BeamSearchScorer
+from generation_logits_process import (
     EncoderNoRepeatNGramLogitsProcessor,
     ForcedBOSTokenLogitsProcessor,
     ForcedEOSTokenLogitsProcessor,
@@ -40,14 +40,14 @@ from .generation_logits_process import (
     TopKLogitsWarper,
     TopPLogitsWarper,
 )
-from .generation_stopping_criteria import (
+from generation_stopping_criteria import (
     MaxLengthCriteria,
     MaxNewTokensCriteria,
     MaxTimeCriteria,
     StoppingCriteriaList,
     validate_stopping_criteria,
 )
-from .utils import logging
+from utils import logging
 
 
 logger = logging.get_logger(__name__)

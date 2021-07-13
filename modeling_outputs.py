@@ -17,7 +17,7 @@ from typing import Optional, Tuple
 
 import torch
 
-from .file_utils import ModelOutput
+from file_utils import ModelOutput
 
 
 @dataclass

@@ -53,7 +53,7 @@ from transformers.utils.versions import importlib_metadata
 
 from utils import logging
 
-
+__version__ = "4.9.0.dev0"
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 ENV_VARS_TRUE_VALUES = {"1", "ON", "YES", "TRUE"}

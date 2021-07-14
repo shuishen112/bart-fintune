@@ -31,7 +31,7 @@ import numpy as np
 
 import requests
 
-from .file_utils import (
+from file_utils import (
     ExplicitEnum,
     PaddingStrategy,
     PushToHubMixin,
@@ -53,7 +53,7 @@ from .file_utils import (
     to_py_obj,
     torch_required,
 )
-from .utils import logging
+from utils import logging
 
 
 if TYPE_CHECKING:

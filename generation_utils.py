@@ -640,7 +640,7 @@ class GenerationMixin:
             stopping_criteria.append(MaxNewTokensCriteria(start_length=start_length, max_new_tokens=max_new_tokens))
         return stopping_criteria
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def generate(
         self,
         input_ids: Optional[torch.LongTensor] = None,

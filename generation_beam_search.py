@@ -249,7 +249,7 @@ class BeamSearchScorer(BeamScorer):
                         continue
                     beam_hyp.add(
                         input_ids[batch_beam_idx].clone(),
-                        next_score.item(),
+                        next_score,
                     )
                 else:
                     # add next predicted token since it is not eos_token

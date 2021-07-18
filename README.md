@@ -8,3 +8,11 @@
 -->
 
 # BART-Finetune
+
+
+## Run
+
+```
+python3 test_bart.py
+
+```

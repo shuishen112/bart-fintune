@@ -24,12 +24,17 @@ print(df_train.head())
 
 model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
 
+# model for gpu
+
+# if torch.cuda.is_available():
+#     model.cuda()
+
 tokenizer = BartTokenizer.from_pretrained('facebook/bart-large-cnn')
 
-def query_expansion(query):
+def query_expansion(query,return_sequence = 5):
     querys = []
     inputs = tokenizer([query], max_length=1024, return_tensors='pt')
-    outputs = model.generate(inputs['input_ids'], num_return_sequences = 5, num_beams=5, max_length=50, early_stopping=True,output_scores = True,return_dict_in_generate =True)
+    outputs = model.generate(inputs['input_ids'], num_return_sequences = return_sequence, num_beams=5, max_length=50, early_stopping=True,output_scores = True,return_dict_in_generate =True)
     sequences = outputs['sequences']
     sequences_scores = outputs['sequences_scores']
 
@@ -59,7 +64,6 @@ def get_bm25_score(query,group):
 
     if len(correct_candidates) == 0:
         return 0
-    
     for i,index in enumerate(correct_candidates.index):
         ap += 1.0 * (i + 1) / (index + 1)
     return ap / len(correct_candidates)
@@ -82,32 +86,38 @@ optimizer = AdamW(model.parameters(), lr = 5e-5)
 # training
 
 model.train()
-with torch.autograd.detect_anomaly():
-    for question in df_train['question'].unique()[:5]:
-        # get the group
 
-        group = df_train[df_train['question'] == question].reset_index()
+# this is for debug
+# with torch.autograd.detect_anomaly(): 
 
-        querys,sequences_scores = query_expansion(question)
+for question in df_train['question'].unique()[:5]:
+    # get the group
 
-        map_scores = []
-        
+    group = df_train[df_train['question'] == question].reset_index()
 
-        for query in querys:
-            map_score = get_bm25_score(query,group)
-            map_scores.append(map_score)
+    querys,sequences_scores = query_expansion(question)
 
-        target_scores = torch.tensor(map_scores).to(torch.float32)
-        print("sequences_scores",sequences_scores)
-        print("target_score",target_scores)
-        loss = loss_fn(sequences_scores,target_scores)
-        print("loss",loss)
+    map_scores = []
+    
 
-        # 反向传播计算梯度
-        loss.backward()
-
-        # 根据梯度更新参数
-        optimizer.step()
-
+    for query in querys:
+        map_score = get_bm25_score(query,group)
+        map_scores.append(map_score)
+    # 注意这里要将tensor 转为float32
+    target_scores = torch.tensor(map_scores).to(torch.float32)
+    
         # 清空grad值
-        optimizer.zero_grad()
+    optimizer.zero_grad()
+    
+    loss = loss_fn(sequences_scores,target_scores)
+    print("sequences_scores",sequences_scores)
+    print("target_score",target_scores)
+    print("loss",loss)
+
+    # 反向传播计算梯度
+    loss.backward()
+
+    # 根据梯度更新参数
+    optimizer.step()
+
+       

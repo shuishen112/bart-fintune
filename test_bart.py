@@ -19,17 +19,18 @@ from gensim import corpora
 from gensim.summarization import bm25
 
 
-df_train = pd.read_csv("/root/program/wiki/train.txt",sep = '\t',quoting = 3,names = ['question','answer','flag'])
+df_train = pd.read_csv("/data/ceph/zhansu/data/wiki_clean/train.txt",sep = '\t',quoting = 3,names = ['question','answer','flag'])
 print(df_train.head())
 
-model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
+model = BartForConditionalGeneration.from_pretrained("/data/ceph/zhansu/embedding/bart/")
+
 
 # model for gpu
 
-# if torch.cuda.is_available():
-#     model.cuda()
+if torch.cuda.is_available():
+    model.cuda()
 
-tokenizer = BartTokenizer.from_pretrained('facebook/bart-large-cnn')
+tokenizer = BartTokenizer.from_pretrained('/data/ceph/zhansu/embedding/bart/')
 
 def query_expansion(query,return_sequence = 5):
     querys = []
@@ -68,11 +69,11 @@ def get_bm25_score(query,group):
         ap += 1.0 * (i + 1) / (index + 1)
     return ap / len(correct_candidates)
 
-# ARTICLE_TO_SUMMARIZE = "My friends are cool but they eat too many carbs."
-# querys, sequences_scores = query_expansion(ARTICLE_TO_SUMMARIZE)
+ARTICLE_TO_SUMMARIZE = "My friends are cool but they eat too many carbs."
+querys, sequences_scores = query_expansion(ARTICLE_TO_SUMMARIZE)
 
-# print(querys)
-# print(sequences_scores)
+print(querys)
+print(sequences_scores)
 
 # dataset
 
@@ -90,7 +91,7 @@ model.train()
 # this is for debug
 # with torch.autograd.detect_anomaly(): 
 
-for question in df_train['question'].unique()[:5]:
+for question in df_train['question'].unique():
     # get the group
 
     group = df_train[df_train['question'] == question].reset_index()

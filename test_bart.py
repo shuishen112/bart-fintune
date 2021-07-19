@@ -19,21 +19,22 @@ from gensim import corpora
 from gensim.summarization import bm25
 
 
-df_train = pd.read_csv("/root/program/wiki/train.txt",sep = '\t',quoting = 3,names = ['question','answer','flag'])
+df_train = pd.read_csv("/data/ceph/zhansu/data/wiki_clean/train.txt",sep = '\t',quoting = 3,names = ['question','answer','flag'])
 print(df_train.head())
 
-model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
+model = BartForConditionalGeneration.from_pretrained("/data/ceph/zhansu/embedding/bart/")
+
 
 # model for gpu
 
-# if torch.cuda.is_available():
-#     model.cuda()
+if torch.cuda.is_available():
+    model.cuda()
 
-tokenizer = BartTokenizer.from_pretrained('facebook/bart-large-cnn')
+tokenizer = BartTokenizer.from_pretrained('/data/ceph/zhansu/embedding/bart/')
 
 def query_expansion(query,return_sequence = 5):
     querys = []
-    inputs = tokenizer([query], max_length=1024, return_tensors='pt')
+    inputs = tokenizer([query], max_length=1024, return_tensors='pt').to(model.device)
     outputs = model.generate(inputs['input_ids'], num_return_sequences = return_sequence, num_beams=5, max_length=50, early_stopping=True,output_scores = True,return_dict_in_generate =True)
     sequences = outputs['sequences']
     sequences_scores = outputs['sequences_scores']
@@ -68,11 +69,11 @@ def get_bm25_score(query,group):
         ap += 1.0 * (i + 1) / (index + 1)
     return ap / len(correct_candidates)
 
-# ARTICLE_TO_SUMMARIZE = "My friends are cool but they eat too many carbs."
-# querys, sequences_scores = query_expansion(ARTICLE_TO_SUMMARIZE)
+ARTICLE_TO_SUMMARIZE = "My friends are cool but they eat too many carbs."
+querys, sequences_scores = query_expansion(ARTICLE_TO_SUMMARIZE)
 
-# print(querys)
-# print(sequences_scores)
+print(querys)
+print(sequences_scores)
 
 # dataset
 
@@ -90,7 +91,7 @@ model.train()
 # this is for debug
 # with torch.autograd.detect_anomaly(): 
 
-for question in df_train['question'].unique()[:5]:
+for question in df_train['question'].unique():
     # get the group
 
     group = df_train[df_train['question'] == question].reset_index()
@@ -104,7 +105,7 @@ for question in df_train['question'].unique()[:5]:
         map_score = get_bm25_score(query,group)
         map_scores.append(map_score)
     # 注意这里要将tensor 转为float32
-    target_scores = torch.tensor(map_scores).to(torch.float32)
+    target_scores = torch.tensor(map_scores).to(torch.float32).to(model.device)
     
         # 清空grad值
     optimizer.zero_grad()

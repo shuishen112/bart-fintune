@@ -33,7 +33,7 @@ tokenizer = BartTokenizer.from_pretrained('facebook/bart-large-cnn')
 
 def query_expansion(query,return_sequence = 5):
     querys = []
-    inputs = tokenizer([query], max_length=1024, return_tensors='pt')
+    inputs = tokenizer([query], max_length=1024, return_tensors='pt').to(model.device)
     outputs = model.generate(inputs['input_ids'], num_return_sequences = return_sequence, num_beams=5, max_length=50, early_stopping=True,output_scores = True,return_dict_in_generate =True)
     sequences = outputs['sequences']
     sequences_scores = outputs['sequences_scores']
@@ -58,7 +58,7 @@ def get_bm25_score(query,group):
 
     # get map
     ap = 0
-    group = sklearn.utils.shuffle(group,random_state =132)
+    group = sklearn.utils.shuffle(group,random_state = 132)
     candidates = group.sort_values(by = 'score',ascending = False).reset_index()
     correct_candidates = candidates[candidates['flag'] == 1]
 
@@ -104,8 +104,8 @@ for question in df_train['question'].unique()[:5]:
         map_score = get_bm25_score(query,group)
         map_scores.append(map_score)
     # 注意这里要将tensor 转为float32
-    target_scores = torch.tensor(map_scores).to(torch.float32)
-    
+    target_scores = torch.tensor(map_scores).to(torch.float32).to(model.device)
+    print(target_scores.device)
         # 清空grad值
     optimizer.zero_grad()
     

@@ -13,8 +13,8 @@
 # limitations under the License.
 import sys
 
-from dependency_versions_table import deps
-from utils.versions import require_version, require_version_core
+from .dependency_versions_table import deps
+from .utils.versions import require_version, require_version_core
 
 
 # define which module versions we always want to check at run time
@@ -33,7 +33,7 @@ for pkg in pkgs_to_check_at_runtime:
     if pkg in deps:
         if pkg == "tokenizers":
             # must be loaded here, or else tqdm check may fail
-            from file_utils import is_tokenizers_available
+            from .file_utils import is_tokenizers_available
 
             if not is_tokenizers_available():
                 continue  # not required, check version only if installed

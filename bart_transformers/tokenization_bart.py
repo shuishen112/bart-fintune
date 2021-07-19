@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from utils import logging
-from tokenization_roberta import RobertaTokenizer
+from .utils import logging
+from .tokenization_roberta import RobertaTokenizer
 
 
 logger = logging.get_logger(__name__)

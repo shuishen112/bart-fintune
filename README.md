@@ -1,5 +1,5 @@
 <!--
- * @Author: your name
+ * @Author: zhan
  * @Date: 2021-07-13 20:28:04
  * @LastEditTime: 2021-07-13 20:28:20
  * @LastEditors: Please set LastEditors
@@ -13,6 +13,6 @@
 ## Run
 
 ```
-python3 test_bart.py
+python3 bart_generation.py
 
 ```

@@ -20,7 +20,7 @@ from typing import Optional, Tuple
 
 import torch
 
-from file_utils import add_start_docstrings
+from .file_utils import add_start_docstrings
 
 
 PROCESS_INPUTS_DOCSTRING = r"""

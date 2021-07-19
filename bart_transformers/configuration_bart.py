@@ -17,9 +17,9 @@ import warnings
 from collections import OrderedDict
 from typing import Mapping
 
-from configuration_utils import PretrainedConfig
+from .configuration_utils import PretrainedConfig
 #from onnx import OnnxConfigWithPast
-from utils import logging
+from .utils import logging
 
 
 logger = logging.get_logger(__name__)

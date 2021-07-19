@@ -22,8 +22,8 @@ import re
 import unicodedata
 from typing import Any, Dict, List, Optional, Tuple, Union, overload
 
-from file_utils import PaddingStrategy, TensorType, add_end_docstrings
-from tokenization_utils_base import (
+from .file_utils import PaddingStrategy, TensorType, add_end_docstrings
+from .tokenization_utils_base import (
     ENCODE_KWARGS_DOCSTRING,
     ENCODE_PLUS_ADDITIONAL_KWARGS_DOCSTRING,
     INIT_TOKENIZER_DOCSTRING,
@@ -38,7 +38,7 @@ from tokenization_utils_base import (
     TextInputPair,
     TruncationStrategy,
 )
-from utils import logging
+from .utils import logging
 
 
 logger = logging.get_logger(__name__)

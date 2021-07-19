@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import regex as re
 
-from tokenization_utils import AddedToken, PreTrainedTokenizer
-from utils import logging
+from .tokenization_utils import AddedToken, PreTrainedTokenizer
+from .utils import logging
 
 
 if TYPE_CHECKING:

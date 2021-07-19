@@ -16,9 +16,9 @@
 
 from typing import List, Optional
 
-from tokenization_utils import AddedToken
-from utils import logging
-from tokenization_gpt2 import GPT2Tokenizer
+from .tokenization_utils import AddedToken
+from .utils import logging
+from .tokenization_gpt2 import GPT2Tokenizer
 
 
 logger = logging.get_logger(__name__)

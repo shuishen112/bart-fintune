@@ -6,8 +6,8 @@ LastEditors: Please set LastEditors
 Description: In User Settings Edit
 FilePath: /bart-fintune/test_bart.py
 '''
-from modeling_bart import BartForConditionalGeneration
-from tokenization_bart import BartTokenizer
+from bart_transformers.modeling_bart import BartForConditionalGeneration
+from bart_transformers.tokenization_bart import BartTokenizer
 
 from transformers import AdamW
 import torch 
@@ -19,18 +19,18 @@ from gensim import corpora
 from gensim.summarization import bm25
 
 
-df_train = pd.read_csv("/data/ceph/zhansu/data/wiki_clean/train.txt",sep = '\t',quoting = 3,names = ['question','answer','flag'])
+df_train = pd.read_csv("/root/program/wiki/train.txt",sep = '\t',quoting = 3,names = ['question','answer','flag'])
 print(df_train.head())
 
-model = BartForConditionalGeneration.from_pretrained("/data/ceph/zhansu/embedding/bart/")
+model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
 
 
 # model for gpu
 
-if torch.cuda.is_available():
-    model.cuda()
+# if torch.cuda.is_available():
+#     model.cuda()
 
-tokenizer = BartTokenizer.from_pretrained('/data/ceph/zhansu/embedding/bart/')
+tokenizer = BartTokenizer.from_pretrained('facebook/bart-large-cnn')
 
 def query_expansion(query,return_sequence = 5):
     querys = []

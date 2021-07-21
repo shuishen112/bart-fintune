@@ -6,14 +6,15 @@ LastEditors: Please set LastEditors
 Description: In User Settings Edit
 FilePath: /bart-fintune/test_bart.py
 '''
-from bart_transformers.modeling_bart import BartForConditionalGeneration
-from bart_transformers.tokenization_bart import BartTokenizer
+from IR_transformers.modeling_bart import BartForConditionalGeneration
+from IR_transformers.tokenization_bart import BartTokenizer
 
 from transformers import AdamW
 import torch 
 
 import pandas as pd 
 import sklearn
+
 
 from gensim import corpora
 from gensim.summarization import bm25
@@ -35,7 +36,7 @@ tokenizer = BartTokenizer.from_pretrained('facebook/bart-large-cnn')
 def query_expansion(query,return_sequence = 5):
     querys = []
     inputs = tokenizer([query], max_length=1024, return_tensors='pt').to(model.device)
-    outputs = model.generate(inputs['input_ids'], num_return_sequences = return_sequence, num_beams=5, max_length=50, early_stopping=True,output_scores = True,return_dict_in_generate =True)
+    outputs = model.generate(inputs['input_ids'], num_return_sequences = return_sequence, do_sample = True,max_length=50, top_k=50, top_p = 0.95,output_scores = True,return_dict_in_generate =True)
     sequences = outputs['sequences']
     sequences_scores = outputs['sequences_scores']
 
@@ -69,11 +70,11 @@ def get_bm25_score(query,group):
         ap += 1.0 * (i + 1) / (index + 1)
     return ap / len(correct_candidates)
 
-ARTICLE_TO_SUMMARIZE = "My friends are cool but they eat too many carbs."
-querys, sequences_scores = query_expansion(ARTICLE_TO_SUMMARIZE)
+# ARTICLE_TO_SUMMARIZE = "My friends are cool but they eat too many carbs."
+# querys, sequences_scores = query_expansion(ARTICLE_TO_SUMMARIZE)
 
-print(querys)
-print(sequences_scores)
+# print(querys)
+# print(sequences_scores)
 
 # dataset
 
@@ -88,37 +89,38 @@ optimizer = AdamW(model.parameters(), lr = 5e-5)
 
 model.train()
 
-# this is for debug
+epoch = 100
+
+# # this is for debug
 # with torch.autograd.detect_anomaly(): 
 
-for question in df_train['question'].unique():
-    # get the group
+for i in range (epoch):
+    for question in df_train['question'].unique()[:2]:
+        # get the group
 
-    group = df_train[df_train['question'] == question].reset_index()
+        group = df_train[df_train['question'] == question].reset_index()
+        querys,sequences_scores = query_expansion(question)
+        print(querys)
+        map_scores = []
+        
 
-    querys,sequences_scores = query_expansion(question)
+        for query in querys:
+            map_score = get_bm25_score(query,group)
+            map_scores.append(map_score)
+        # 注意这里要将tensor 转为float32
+        target_scores = torch.tensor(map_scores).to(torch.float32).to(model.device)
+            # 清空grad值
+        optimizer.zero_grad()
+        
+        loss = loss_fn(sequences_scores,target_scores)
+        print("sequences_scores",sequences_scores)
+        print("target_score",target_scores)
+        print("loss",loss)
 
-    map_scores = []
-    
+        # 反向传播计算梯度
+        loss.backward()
 
-    for query in querys:
-        map_score = get_bm25_score(query,group)
-        map_scores.append(map_score)
-    # 注意这里要将tensor 转为float32
-    target_scores = torch.tensor(map_scores).to(torch.float32).to(model.device)
-    print(target_scores.device)
-        # 清空grad值
-    optimizer.zero_grad()
-    
-    loss = loss_fn(sequences_scores,target_scores)
-    print("sequences_scores",sequences_scores)
-    print("target_score",target_scores)
-    print("loss",loss)
-
-    # 反向传播计算梯度
-    loss.backward()
-
-    # 根据梯度更新参数
-    optimizer.step()
+        # 根据梯度更新参数
+        optimizer.step()
 
        

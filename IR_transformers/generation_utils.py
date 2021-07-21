@@ -1775,15 +1775,15 @@ class GenerationMixin:
         this_peer_finished = False  # used by synced_gpus only
         while True:
 
-            # if synced_gpus:
-            #     # Under synced_gpus the `forward` call must continue until all gpus complete their sequence.
-            #     # The following logic allows an early break if all peers finished generating their sequence
-            #     this_peer_finished_flag = torch.tensor(0.0 if this_peer_finished else 1.0).to(input_ids.device)
-            #     # send 0.0 if we finished, 1.0 otherwise
-            #     dist.all_reduce(this_peer_finished_flag, op=dist.ReduceOp.SUM)
-            #     # did all peers finish? the reduced sum will be 0.0 then
-            #     if this_peer_finished_flag.item() == 0.0:
-            #         break
+            if synced_gpus:
+                # Under synced_gpus the `forward` call must continue until all gpus complete their sequence.
+                # The following logic allows an early break if all peers finished generating their sequence
+                this_peer_finished_flag = torch.tensor(0.0 if this_peer_finished else 1.0).to(input_ids.device)
+                # send 0.0 if we finished, 1.0 otherwise
+                dist.all_reduce(this_peer_finished_flag, op=dist.ReduceOp.SUM)
+                # did all peers finish? the reduced sum will be 0.0 then
+                if this_peer_finished_flag.item() == 0.0:
+                    break
 
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
 
@@ -1794,9 +1794,9 @@ class GenerationMixin:
                 output_hidden_states=output_hidden_states,
             )
 
-            # if synced_gpus and this_peer_finished:
-            #     cur_len = cur_len + 1
-            #     continue  # don't waste resources running the code we don't need
+            if synced_gpus and this_peer_finished:
+                cur_len = cur_len + 1
+                continue  # don't waste resources running the code we don't need
 
             next_token_logits = outputs.logits[:, -1, :]
 
@@ -2104,7 +2104,7 @@ class GenerationMixin:
             next_token_logits = self.adjust_logits_during_generation(next_token_logits, cur_len=cur_len)
             next_token_scores = nn.functional.log_softmax(
                 next_token_logits, dim=-1
-            )  # (batch_size * num_beams, vocab_size)
+            ).clone()  # (batch_size * num_beams, vocab_size)
 
             next_token_scores = logits_processor(input_ids, next_token_scores)
             next_token_scores = next_token_scores + beam_scores[:, None].expand_as(next_token_scores)

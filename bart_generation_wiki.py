@@ -18,6 +18,7 @@ import sklearn
 
 from gensim import corpora
 from gensim.summarization import bm25
+from torch.utils.data import Dataset
 
 
 df_train = pd.read_csv("/root/program/wiki/train.txt",sep = '\t',quoting = 3,names = ['question','answer','flag'])
@@ -70,6 +71,11 @@ def get_bm25_score(query,group):
         ap += 1.0 * (i + 1) / (index + 1)
     return ap / len(correct_candidates)
 
+class wiki_data(Dataset):
+    def __init__(self, data_path):
+        df = pd.read_csv(data_path,sep = '\t',quoting = 3,names = ['question','answer','flag'])
+
+
 # ARTICLE_TO_SUMMARIZE = "My friends are cool but they eat too many carbs."
 # querys, sequences_scores = query_expansion(ARTICLE_TO_SUMMARIZE)
 
@@ -94,33 +100,54 @@ epoch = 100
 # # this is for debug
 # with torch.autograd.detect_anomaly(): 
 
-for i in range (epoch):
-    for question in df_train['question'].unique()[:2]:
-        # get the group
+df_train_true = df_train[df_train['flag'] == 1]
+print(df_train_true)
 
-        group = df_train[df_train['question'] == question].reset_index()
-        querys,sequences_scores = query_expansion(question)
-        print(querys)
-        map_scores = []
+for i in range(epoch):
+    for _, item in df_train_true.iterrows():
+        question = item['question']
+        answer = item['answer']
+
+        print(question)
+        print(answer)
+        input_ids = tokenizer(question).input_ids
+        labels = tokenizer(answer).input_ids
+        loss = model(input_ids=input_ids,
+        labels = labels)
+        print("bart loss",loss)
+
+
+
+
+
+
+
+# for i in range (epoch):
+#     for question in df_train['question'].unique()[:2]:
+#         # get the group
+
+#         group = df_train[df_train['question'] == question].reset_index()
+#         querys,sequences_scores = query_expansion(question)
+#         print(querys)
+#         map_scores = []
         
 
-        for query in querys:
-            map_score = get_bm25_score(query,group)
-            map_scores.append(map_score)
-        # 注意这里要将tensor 转为float32
-        target_scores = torch.tensor(map_scores).to(torch.float32).to(model.device)
-            # 清空grad值
-        optimizer.zero_grad()
+#         for query in querys:
+#             map_score = get_bm25_score(query,group)
+#             map_scores.append(map_score)
+#         # 注意这里要将tensor 转为float32
+#         target_scores = torch.tensor(map_scores).to(torch.float32).to(model.device)
+#             # 清空grad值
+#         optimizer.zero_grad()
         
-        loss = loss_fn(sequences_scores,target_scores)
-        print("sequences_scores",sequences_scores)
-        print("target_score",target_scores)
-        print("loss",loss)
+#         loss = loss_fn(sequences_scores,target_scores)
+#         print("sequences_scores",sequences_scores)
+#         print("target_score",target_scores)
+#         print("loss",loss)
 
-        # 反向传播计算梯度
-        loss.backward()
+#         # 反向传播计算梯度
+#         loss.backward()
 
-        # 根据梯度更新参数
-        optimizer.step()
-
+#         # 根据梯度更新参数
+#         optimizer.step()
        

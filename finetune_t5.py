@@ -1,11 +1,11 @@
-import wandb
+# import wandb
 from transformers import get_linear_schedule_with_warmup
 from nlp import list_datasets
 from nlp import load_dataset
 from IR_transformers.modeling_t5 import T5ForConditionalGeneration
 from IR_transformers.tokenization_t5 import T5Tokenizer
 from nlp import load_metric
-from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import WandbLogger,TensorBoardLogger
 from torch.utils.data import Dataset, DataLoader
 import pytorch_lightning as pl
 import torch.nn as nn
@@ -23,11 +23,12 @@ import random
 import re
 from itertools import chain
 from string import punctuation
-
 import nltk
+import wandb
 nltk.download('punkt')
 
 wandb_logger = WandbLogger(project="wikohow-t5")
+tb_logger = TensorBoardLogger("logs/")
 
 
 class wikihow(Dataset):
@@ -114,8 +115,8 @@ print("Sanity check - Decode Summary: ", tokenizer.decode(data['target_ids']))
 
 args_dict = dict(
     output_dir="",  # path to save the checkpoints
-    model_name_or_path='t5-small',
-    tokenizer_name_or_path='t5-small',
+    model_name_or_path='./t5_finetune_model',
+    tokenizer_name_or_path='./t5_finetune_model',
     max_input_length=512,
     max_output_length=150,
     freeze_encoder=False,
@@ -131,9 +132,9 @@ args_dict = dict(
     n_gpu=1,
     resume_from_checkpoint=None,
     val_check_interval=0.05,
-    n_val=1000,
-    n_train=-1,
-    n_test=-1,
+    n_val=10,
+    n_train=10,
+    n_test=10,
     early_stop_callback=False,
     fp_16=False,  # if you want to enable 16-bit training then install apex and set this to true
     opt_level='O1',  # you can find out more on optimisation levels here https://nvidia.github.io/apex/amp.html#opt-levels-and-properties
@@ -142,7 +143,7 @@ args_dict = dict(
     seed=42,
 )
 
-tokenizer = T5Tokenizer.from_pretrained('t5-small')
+# tokenizer = T5Tokenizer.from_pretrained('t5-small')
 
 # 获取数据
 args_dict.update({'output_dir': 't5_wikihow', 'num_train_epochs': 2,
@@ -156,48 +157,6 @@ def get_dataset(tokenizer, type_path, num_samples, args):
                    output_length=args.max_output_length)
 
 
-train_dataset = get_dataset(
-    tokenizer=tokenizer, type_path="train", num_samples=2000, args=args)
-dataloader = DataLoader(train_dataset, batch_size=args.train_batch_size)
-
-'''
-# 进行训练
-model = T5ForConditionalGeneration.from_pretrained("t5-small")
-
-
-# 构建optimizer
-optimizer = torch.optim.Adam(model.parameters(), lr = 1e-3)
-
-model.train()
-
-if torch.cuda.is_available():
-    model.cuda()
-
-
-for epoch in range(args.num_train_epochs):
-    # train loop
-    for e, train_batch in enumerate(dataloader):
-        lm_labels = train_batch["target_ids"]
-        lm_labels[lm_labels[:,:] == tokenizer.pad_token_id] = -100
-
-
-        outputs = model(input_ids = train_batch["source_ids"].cuda(),
-        attention_mask = train_batch['source_mask'].cuda(),
-        labels = lm_labels.cuda(),
-        decoder_attention_mask = train_batch['target_mask'].cuda()
-        )
-
-        loss = outputs[0]
-
-
-        # 1 计算反向传播的值
-        loss.backward()
-        # 2 反向传播更新梯度
-        optimizer.step()
-        # 3 将梯度清零
-        optimizer.zero_grad()
-        print(loss.item())
-'''
 
 ################### Define Model ############################
 
@@ -333,12 +292,16 @@ class T5FineTuner(pl.LightningModule):
         loss = self._step(batch)
 
         tensorboard_logs = {"train_loss": loss}
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return {"loss": loss, "log": tensorboard_logs}
 
     def training_epoch_end(self, outputs):
         avg_train_loss = torch.stack([x["loss"] for x in outputs]).mean()
         tensorboard_logs = {"avg_train_loss": avg_train_loss}
-        return {"avg_train_loss": avg_train_loss, "log": tensorboard_logs, 'progress_bar': tensorboard_logs}
+        self.log("avg_train_loss", avg_train_loss, on_epoch=True, prog_bar=True, logger=True)
+        # self.logger.experiment.add_scalar("avg_train_loss", avg_train_loss, self.current_epoch)
+
+        # return {"avg_train_loss": avg_train_loss, "log": tensorboard_logs, 'progress_bar': tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
         return self._generative_step(batch)
@@ -357,10 +320,13 @@ class T5FineTuner(pl.LightningModule):
         # Clear out the lists for next epoch
         self.target_gen = []
         self.prediction_gen = []
-        return {"avg_val_loss": avg_loss,
-                "rouge1": rouge_results['rouge1'],
-                "rougeL": rouge_results['rougeL'],
-                "log": tensorboard_logs, 'progress_bar': tensorboard_logs}
+        # self.log("rouge1",rouge_results['rouge1'],on_epoch=True, prog_bar=True, logger=True)
+        # self.log("rougeL",rouge_results['rougeL'],on_epoch=True, prog_bar=True, logger=True)
+
+        # return {"avg_val_loss": avg_loss,
+        #         "rouge1": rouge_results['rouge1'],
+        #         "rougeL": rouge_results['rougeL'],
+        #         "log": tensorboard_logs, 'progress_bar': tensorboard_logs}
 
     def configure_optimizers(self):
         "Prepare optimizer and schedule (linear warmup and decay)"
@@ -477,6 +443,7 @@ train_params = dict(
     checkpoint_callback=True,
     val_check_interval=args.val_check_interval,
     logger=wandb_logger,
+    # logger = tb_logger,
     callbacks=[LoggingCallback()],
 )
 
@@ -487,3 +454,4 @@ model = T5FineTuner(args)
 
 trainer = pl.Trainer(**train_params)
 trainer.fit(model)
+wandb.finish()

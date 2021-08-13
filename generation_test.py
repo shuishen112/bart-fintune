@@ -4,6 +4,7 @@ import torch
 model = T5ForConditionalGeneration.from_pretrained("t5-small")
 tokenizer = T5Tokenizer.from_pretrained("t5-small")
 
+
 input_ids = tokenizer('how are glacier caves formed ?', return_tensors='pt').input_ids
 labels = tokenizer('A glacier cave is a cave formed within the ice of a glacier .', return_tensors='pt').input_ids
 # the forward function automatically creates the correct decoder_input_ids

@@ -6,3 +6,4 @@ gensim==3.8.0
 sentencepiece
 nlp
 pytorch-lightning
+rouge_score

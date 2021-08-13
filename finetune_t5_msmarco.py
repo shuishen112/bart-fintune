@@ -19,11 +19,11 @@ msk = np.random.rand(len(df)) < 0.8
 df_train = df[msk]
 df_test = df[~msk]
 
-train_dataset = nlp_dataset.from_pandas(df_train)
-test_dataset = nlp_dataset.from_pandas(df_test)
+# train_dataset = nlp_dataset.from_pandas(df_train)
+# test_dataset = nlp_dataset.from_pandas(df_test)
 
-print("train_number",len(train_dataset))
-print("test_number",len(test_dataset))
+# print("train_number",len(train_dataset))
+# print("test_number",len(test_dataset))
 
 
 
@@ -105,6 +105,7 @@ args_dict = dict(
 )
 
 args = argparse.Namespace(**args_dict)
+
 
 
 train_dataset = get_dataset(tokenizer = tokenizer,type_path= "train",num_samples = 200, args = args)

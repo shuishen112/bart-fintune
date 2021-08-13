@@ -2,10 +2,11 @@
 from transformers import get_linear_schedule_with_warmup
 from nlp import list_datasets
 from nlp import load_dataset
+from nlp import Dataset as nlp_dataset
 from IR_transformers.modeling_t5 import T5ForConditionalGeneration
 from IR_transformers.tokenization_t5 import T5Tokenizer
 from nlp import load_metric
-from pytorch_lightning.loggers import WandbLogger,TensorBoardLogger
+from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from torch.utils.data import Dataset, DataLoader
 import pytorch_lightning as pl
 import torch.nn as nn
@@ -27,14 +28,26 @@ import nltk
 import wandb
 nltk.download('punkt')
 
-wandb_logger = WandbLogger(project="wikohow-t5")
+wandb_logger = WandbLogger(project="msmarco")
 tb_logger = TensorBoardLogger("logs/")
 
+df = pd.read_csv("/root/program/ir_data/doc_query_pairs.train.tsv",
+                 sep='\t', names=["doc", "query"])
+msk = np.random.rand(len(df)) < 0.8
 
-class wikihow(Dataset):
+df_train = df[msk]
+df_test = df[~msk]
+
+
+class msmarco(Dataset):
     def __init__(self, tokenizer, type_path, num_samples, input_length, output_length, print_text=False):
-        self.dataset = load_dataset(
-            'wikihow', 'all', data_dir='../summary_dataset/', split=type_path)
+        # self.dataset = load_dataset(
+        #     'wikihow', 'all', data_dir='../summary_dataset/', split=type_path)
+
+        if type_path == 'train':
+            self.dataset = nlp_dataset.from_pandas(df_train)
+        elif type_path == "validation":
+            self.dataset = nlp_dataset.from_pandas(df_test)
         if num_samples:
             self.dataset = self.dataset.select(list(range(0, num_samples)))
         self.input_length = input_length
@@ -55,21 +68,17 @@ class wikihow(Dataset):
         return text
 
     def convert_to_features(self, example_batch):
-        # Tokenize contexts and questions (as pairs of inputs)
-
         if self.print_text:
-            print("Input Text: ", self.clean_text(example_batch['text']))
-#         input_ = self.clean_text(example_batch['text']) + " </s>"
-#         target_ = self.clean_text(example_batch['headline']) + " </s>"
+            print("Input Text: ", self.clean_text(example_batch['doc']))
 
-        input_ = self.clean_text(example_batch['text'])
-        target_ = self.clean_text(example_batch['headline'])
+        input_ = self.clean_text(example_batch['query'])
+        target_ = self.clean_text(example_batch['doc'])
 
         source = self.tokenizer.batch_encode_plus([input_], max_length=self.input_length,
-                                                  padding='max_length', truncation=True, return_tensors="pt")
+                                                  padding="max_length", truncation=True, return_tensors="pt")
 
         targets = self.tokenizer.batch_encode_plus([target_], max_length=self.output_length,
-                                                   padding='max_length', truncation=True, return_tensors="pt")
+                                                   padding="max_length", truncation=True, return_tensors="pt")
 
         return source, targets
 
@@ -146,16 +155,15 @@ args_dict = dict(
 # tokenizer = T5Tokenizer.from_pretrained('t5-small')
 
 # 获取数据
-args_dict.update({'output_dir': 't5_wikihow', 'num_train_epochs': 2,
+args_dict.update({'output_dir': 't5_msmarco', 'num_train_epochs': 2,
                  'train_batch_size': 4, 'eval_batch_size': 4})
 args = argparse.Namespace(**args_dict)
 print(args_dict)
 
 
 def get_dataset(tokenizer, type_path, num_samples, args):
-    return wikihow(tokenizer=tokenizer, type_path=type_path, num_samples=num_samples,  input_length=args.max_input_length,
+    return msmarco(tokenizer=tokenizer, type_path=type_path, num_samples=num_samples,  input_length=args.max_input_length,
                    output_length=args.max_output_length)
-
 
 
 ################### Define Model ############################
@@ -292,13 +300,15 @@ class T5FineTuner(pl.LightningModule):
         loss = self._step(batch)
 
         tensorboard_logs = {"train_loss": loss}
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("train_loss", loss, on_step=True,
+                 on_epoch=True, prog_bar=True, logger=True)
         return {"loss": loss, "log": tensorboard_logs}
 
     def training_epoch_end(self, outputs):
         avg_train_loss = torch.stack([x["loss"] for x in outputs]).mean()
         tensorboard_logs = {"avg_train_loss": avg_train_loss}
-        self.log("avg_train_loss", avg_train_loss, on_epoch=True, prog_bar=True, logger=True)
+        self.log("avg_train_loss", avg_train_loss,
+                 on_epoch=True, prog_bar=True, logger=True)
         # self.logger.experiment.add_scalar("avg_train_loss", avg_train_loss, self.current_epoch)
 
         # return {"avg_train_loss": avg_train_loss, "log": tensorboard_logs, 'progress_bar': tensorboard_logs}

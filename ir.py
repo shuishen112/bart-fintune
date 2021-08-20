@@ -179,7 +179,7 @@ def generate_query(row):
 querys = dataset.get_topics("dev.small")[:10]
 
 querys["query_write"] = querys.apply(generate_query,axis = 1)
-# querys.columns = ["qid","original_query","query"]
+querys.columns = ["qid","original_query","query"]
 print(querys.head())
 print(len(querys))
 

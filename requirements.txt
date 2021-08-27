@@ -4,4 +4,6 @@ torchvision==0.10.0
 torchaudio==0.9.0
 gensim==3.8.0
 sentencepiece
+nlp
+pytorch-lightning
 rouge_score

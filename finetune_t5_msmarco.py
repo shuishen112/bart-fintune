@@ -10,9 +10,15 @@ import argparse
 from torch.utils.data import Dataset, DataLoader,random_split
 import torch
 import numpy as np 
+import logging
+
+FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+logging.basicConfig(level = logging.INFO, format=FORMAT)
+logger = logging.getLogger(__name__)
+
 # dataset = load_dataset('squad', split='train')
 # print(dataset)
-df = pd.read_csv("/root/program/ir_data/doc_query_pairs.train.tsv",sep = '\t',names = ["doc","query"])
+df = pd.read_csv("/data/ceph/zhansu/data/msmarco/doc_query_pairs.train.tsv",sep = '\t',names = ["doc","query"])
 
 msk = np.random.rand(len(df)) < 0.8
 
@@ -28,8 +34,8 @@ df_test = df[~msk]
 
 
 
-model = T5ForConditionalGeneration.from_pretrained("t5-small")
-tokenizer = T5Tokenizer.from_pretrained("t5-small")
+model = T5ForConditionalGeneration.from_pretrained("/data/ceph/zhansu/embedding/t5-small")
+tokenizer = T5Tokenizer.from_pretrained("/data/ceph/zhansu/embedding/t5-small")
 
 class msmarco(Dataset):
     def __init__(self,tokenizer, type_path, num_samples, input_length, output_length, print_text = False):
@@ -99,9 +105,9 @@ def get_dataset(tokenizer, type_path, num_samples, args):
 args_dict = dict(
     max_input_length = 150,
     max_output_length = 512,
-    train_batch_size = 4,
-    test_batch_size = 4,
-    num_train_epochs = 1
+    train_batch_size = 25,
+    test_batch_size = 25,
+    num_train_epochs = 2
 )
 
 args = argparse.Namespace(**args_dict)
@@ -124,6 +130,8 @@ if torch.cuda.is_available():
 
 
 for epoch in range(args.num_train_epochs):
+    logger.info("epoch:{}".format(epoch))
+    model.train()
     # train loop
     for e, train_batch in enumerate(train_dataloader):
         lm_labels = train_batch["target_ids"]
@@ -145,7 +153,7 @@ for epoch in range(args.num_train_epochs):
         optimizer.step()
         # 3 将梯度清零
         optimizer.zero_grad()
-        print("train loss",loss.item())
+        logger.info("train loss:{}".format(loss.item()))
 
     # eval model
     model.eval()
@@ -165,7 +173,6 @@ for epoch in range(args.num_train_epochs):
             loss = outputs[0]
             test_loss.append(loss)
 
-        print("test loss", torch.mean(torch.tensor(test_loss)))
-
-model.save_pretrained("./t5_finetune_model")
+        logger.info("test loss:{}".format(torch.mean(torch.tensor(test_loss))))
+    model.save_pretrained("./t5_finetune_model")
         

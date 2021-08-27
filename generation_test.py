@@ -1,13 +1,18 @@
 from IR_transformers.modeling_t5 import T5ForConditionalGeneration
 from IR_transformers.tokenization_t5 import T5Tokenizer
 import torch
-model = T5ForConditionalGeneration.from_pretrained("t5-small")
-tokenizer = T5Tokenizer.from_pretrained("t5-small")
+import logging 
+model = T5ForConditionalGeneration.from_pretrained("/data/ceph/zhansu/embedding/t5-small")
+tokenizer = T5Tokenizer.from_pretrained("/data/ceph/zhansu/embedding/t5-small")
 
 
 input_ids = tokenizer('how are glacier caves formed ?', return_tensors='pt').input_ids
 labels = tokenizer('A glacier cave is a cave formed within the ice of a glacier .', return_tensors='pt').input_ids
 # the forward function automatically creates the correct decoder_input_ids
+
+FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+logging.basicConfig(level = logging.INFO, format=FORMAT)
+logger = logging.getLogger(__name__)
 
 epoch = 100
 
@@ -23,6 +28,7 @@ for i in range(epoch):
     optimizer.step()
 
     optimizer.zero_grad()
+    logger.info("train loss:{}".format(loss.item()))
     print("train loss",loss.item())
 
 #训练完成后进行生成句子

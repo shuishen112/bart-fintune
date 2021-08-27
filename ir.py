@@ -119,11 +119,32 @@ def msmarco_generate():
 index = pt.IndexFactory.of("./passage_index_8")
 print(index.getCollectionStatistics().toString())
 
-BM25_br = pt.BatchRetrieve(index, wmodel="BM25") % 10
+BM25_br = pt.BatchRetrieve(index, metadata = ["docno","text"], wmodel="BM25") % 10
 
+querys = dataset.get_topics("train")[:10]
+qrels = dataset.get_qrels("train")
+
+# for item in dataset.get_corpus_iter():
+#     print(item)
+
+print(querys.head())
+
+
+print(querys.head())
+print(qrels.head())
 # 测试单个query
-# res = BM25_br.search("are you ok")
-# print(res)
+res = BM25_br.transform(querys)
+print(res.head())
+
+eval = pt.Utils.evaluate(res,qrels,metrics = ['map'], perquery = True)
+print(eval)
+
+
+# for _, row in querys.iterrows():
+#     query = row['query']
+#     res = BM25_br.search("query")
+#     print(res)
+
 
 # qrels = dataset.get_qrels("train")
 # print("len qrels",len(qrels))
@@ -165,7 +186,6 @@ labels = tokenizer('A glacier cave is a cave formed within the ice of a glacier 
 
 def generate_query(row):
     original_query = row['query']
-    print(original_query)
     input_ids = tokenizer(original_query,return_tensors = "pt").input_ids
     beam_output = model.generate(
     input_ids,
@@ -176,18 +196,23 @@ def generate_query(row):
 
     return tokenizer.decode(beam_output[0], skip_special_tokens=True)
 
-querys = dataset.get_topics("dev.small")[:10]
 
-querys["query_write"] = querys.apply(generate_query,axis = 1)
-querys.columns = ["qid","original_query","query"]
-print(querys.head())
-print(len(querys))
 
-from pyterrier.measures import * 
-result = pt.Experiment(
-    [BM25_br],
-    querys,
-    dataset.get_qrels("dev.small"),
-    eval_metrics=[RR(rel = 1)])
 
-print(result)
+# 对于每个qa对，query和docid生成一个概率，doc作为query会有一个map值，这个map值去和query做softmaxloss
+
+
+
+
+# querys["query_write"] = querys.apply(generate_query,axis = 1)
+# querys.columns = ["qid","original_query","query"]
+
+
+# from pyterrier.measures import * 
+# result = pt.Experiment(
+#     [BM25_br],
+#     querys,
+#     dataset.get_qrels("dev.small"),
+#     eval_metrics=[RR(rel = 1)])
+
+# print(result)

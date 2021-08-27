@@ -8,9 +8,12 @@ FilePath: /bart-fintune/test_bart.py
 '''
 from IR_transformers.modeling_bart import BartForConditionalGeneration
 from IR_transformers.tokenization_bart import BartTokenizer
+from IR_transformers.modeling_t5 import T5ForConditionalGeneration
+from IR_transformers.tokenization_t5 import T5Tokenizer
+
 
 from transformers import AdamW
-import torch 
+import torch
 
 import pandas as pd 
 import sklearn
@@ -21,20 +24,26 @@ from gensim.summarization import bm25
 from torch.utils.data import Dataset
 
 
+model_name = "t5"
 df_train = pd.read_csv("/root/program/wiki/train.txt",sep = '\t',quoting = 3,names = ['question','answer','flag'])
 print(df_train.head())
 
-model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
-
+if model_name == 't5':
+    model = T5ForConditionalGeneration.from_pretrained("t5_finetune_model")
+    tokenizer = T5Tokenizer.from_pretrained("t5_finetune_model")
+elif model_name == 'bart':
+    model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
+    tokenizer = BartTokenizer.from_pretrained('facebook/bart-large-cnn')
+else:
+    print("invalid model name")
 
 # model for gpu
 
 # if torch.cuda.is_available():
 #     model.cuda()
 
-tokenizer = BartTokenizer.from_pretrained('facebook/bart-large-cnn')
 
-def query_expansion(query,return_sequence = 5):
+def query_expansion(query,return_sequence = 2):
     querys = []
     inputs = tokenizer([query], max_length=1024, return_tensors='pt').to(model.device)
     outputs = model.generate(inputs['input_ids'], num_return_sequences = return_sequence, do_sample = True,max_length=50, top_k=50, top_p = 0.95,output_scores = True,return_dict_in_generate =True)
@@ -75,7 +84,6 @@ class wiki_data(Dataset):
     def __init__(self, data_path):
         df = pd.read_csv(data_path,sep = '\t',quoting = 3,names = ['question','answer','flag'])
 
-
 # ARTICLE_TO_SUMMARIZE = "My friends are cool but they eat too many carbs."
 # querys, sequences_scores = query_expansion(ARTICLE_TO_SUMMARIZE)
 
@@ -108,12 +116,27 @@ for i in range(epoch):
         question = item['question']
         answer = item['answer']
 
-        print(question)
-        print(answer)
-        input_ids = tokenizer(question).input_ids
-        labels = tokenizer(answer).input_ids
-        loss = model(input_ids=input_ids,
-        labels = labels)
+        tokenizer_source = tokenizer(question,return_tensors = 'pt')
+        tokenizer_target = tokenizer(answer,return_tensors = 'pt')
+
+
+        # exit() 
+        outputs = model(input_ids=tokenizer_source['input_ids'],
+        attention_mask = tokenizer_source['attention_mask'],
+        labels = tokenizer_target['input_ids'],
+        decoder_attention_mask = tokenizer_target['attention_mask']
+        )
+
+        loss = outputs['loss']
+        logits = outputs['logits']
+
+        m = torch.nn.Softmax(dim = 2)
+        softmax_score = m(logits)
+        print(softmax_score)
+        
+        scores = torch.prod(torch.max(softmax_score,2).values,1)
+
+        print(scores)
         print("bart loss",loss)
 
 

@@ -27,19 +27,22 @@ pt.init()
 #     dataset.get_qrels(),
 #     eval_metrics=["P.5", "P.10", "ndcg_cut.10", "map"]))
 
+
+
 #************************ 进行textscorer的测试 ******************************
 
-# df = pd.DataFrame(
-#     [
-#         ["q1", "chemical reactions", "d1", "professor protor poured the chemicals"],
-#         ["q1", "chemical reactions",  "d2", "chemical brothers turned up the beats"],
-#     ], columns=["qid", "query", "docno","text"])
+df = pd.DataFrame(
+    [
+        ["q1", "chemical reactions", "d1", "professor protor poured the chemicals"],
+        ["q1", "chemical reactions",  "d2", "chemical brothers turned up the beats"],
+    ], columns=["qid", "query", "docno","text"])
 
-# print(df)
-# textscorer = pt.batchretrieve.TextScorer(takes="docs", body_attr="text", wmodel="BM25")
-# rtr = textscorer.transform(df)
-# print(rtr)
+print(df)
+textscorer = pt.batchretrieve.TextScorer(takes="docs", body_attr="text", wmodel="BM25")
+rtr = textscorer.transform(df)
+print(rtr)
 
+exit()
 # data = pd.read_csv("/root/program/WikiQACorpus/WikiQA-train.tsv",sep = '\t',quoting = 3)
 # print(data.head)
 # train_data = data[['QuestionID','Question','SentenceID','Sentence']]
@@ -88,21 +91,21 @@ pt.init()
 # print(result)
 
 # ************************对单个query进行检索******************
-# print(BM25_br.search("Light"))
+print(BM25_br.search("Light"))
 
 
-# print(dataset.get_qrels("train"))
+print(dataset.get_qrels("train"))
 
-# topics = dataset.get_topics("test-2020")
+topics = dataset.get_topics("test-2020")
 
-# res = BM25_br.transform(topics)
-# print(res.head())
+res = BM25_br.transform(topics)
+print(res.head())
 
 
-# qrels = dataset.get_qrels("test-2020")
-# eval = pt.Utils.evaluate(res,qrels,metrics = ['map'], perquery = True)
-# print(len(eval))
-# print(len(topics))
+qrels = dataset.get_qrels("test-2020")
+eval = pt.Utils.evaluate(res,qrels,metrics = ['map'], perquery = True)
+print(len(eval))
+print(len(topics))
 
 
 # ************************对Msmarco Passage Ranking ******************
@@ -168,51 +171,3 @@ print(eval)
 # print(len(dataset.get_topics("dev.small")))
 # print(result)
 
-######################### 载入T5模型，用T5模型生成query################
-
-
-
-from IR_transformers.modeling_t5 import T5ForConditionalGeneration
-from IR_transformers.tokenization_t5 import T5Tokenizer
-
-model = T5ForConditionalGeneration.from_pretrained("./t5_finetune_model")
-tokenizer = T5Tokenizer.from_pretrained("./t5_finetune_model")
-
-input_ids = tokenizer('how are glacier caves formed ?', return_tensors='pt').input_ids
-labels = tokenizer('A glacier cave is a cave formed within the ice of a glacier .', return_tensors='pt').input_ids
-
-# loss = model(input_ids = input_ids, labels = labels).loss
-# print("loss:", loss)
-
-def generate_query(row):
-    original_query = row['query']
-    input_ids = tokenizer(original_query,return_tensors = "pt").input_ids
-    beam_output = model.generate(
-    input_ids,
-    max_length=10,
-    num_beams=5,
-    early_stopping=True
-    )
-
-    return tokenizer.decode(beam_output[0], skip_special_tokens=True)
-
-
-
-
-# 对于每个qa对，query和docid生成一个概率，doc作为query会有一个map值，这个map值去和query做softmaxloss
-
-
-
-
-# querys["query_write"] = querys.apply(generate_query,axis = 1)
-# querys.columns = ["qid","original_query","query"]
-
-
-# from pyterrier.measures import * 
-# result = pt.Experiment(
-#     [BM25_br],
-#     querys,
-#     dataset.get_qrels("dev.small"),
-#     eval_metrics=[RR(rel = 1)])
-
-# print(result)

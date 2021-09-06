@@ -244,12 +244,10 @@ class T5FineTuner(pl.LightningModule):
 
         input_querys = batch['input']
 
-        # 根据source_id 生成querys
+        # 根据source_id 生成querys,从而获得每个生成query在检索中的map值
         generated_querys = self._generative_train(batch)
 
-
         topic_train = pd.DataFrame({"qid":qid, "query":generated_querys})
-
 
         res = BM25_br.transform(topic_train)
 
@@ -272,14 +270,13 @@ class T5FineTuner(pl.LightningModule):
 
         logits = outputs['logits']
 
-        
-
         m = torch.nn.Softmax(dim = 2)
         softmax_score = m(logits)
         # 这个scores是生成的概率
         scores = torch.prod(torch.max(softmax_score,2).values,1)
         target_scores = target_scores.type_as(scores)
-        # 生成loss
+
+        # 生成loss,我们用map作为reward来训练我们的生成模型
         loss_fn = torch.nn.MSELoss()
         loss = loss_fn(target_scores,scores)
         

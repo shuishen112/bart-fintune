@@ -1,20 +1,22 @@
 # import wandb
+import pytorch_lightning as pl
 from transformers import get_linear_schedule_with_warmup
 from nlp import list_datasets
 from nlp import load_dataset
 from nlp import Dataset as nlp_dataset
 from IR_transformers.modeling_t5 import T5ForConditionalGeneration
 from IR_transformers.tokenization_t5 import T5Tokenizer
-from nlp import load_metric
-from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
+
+
+from pytorch_lightning.loggers import TensorBoardLogger,WandbLogger
 from torch.utils.data import Dataset, DataLoader
-import pytorch_lightning as pl
+
 from pytorch_lightning.plugins import DDPPlugin
 import torch.nn as nn
 import torch
 import numpy as np
 import pandas as pd
-# from nltk.tokenize import sent_tokenize
+from nltk.tokenize import sent_tokenize
 import argparse
 import glob
 import os
@@ -25,7 +27,7 @@ import random
 import re
 from itertools import chain
 from string import punctuation
-# import nltk
+import nltk
 import wandb
 my_num_workers = os.cpu_count()
 
@@ -111,7 +113,7 @@ args_dict = dict(
     model_name_or_path='/data/ceph/zhansu/embedding/t5-small',
     tokenizer_name_or_path='/data/ceph/zhansu/embedding/t5-small',
     max_input_length=150,
-    max_output_length=512,
+    max_output_length=150,
     freeze_encoder=False,
     freeze_embeds=False,
     learning_rate=3e-4,
@@ -474,9 +476,9 @@ if __name__ == "__main__":
     trainer.test(model,ckpt_path="best")
 
     print(trainer.checkpoint_callback.best_k_models.items())
-    # for i, (path, _) in enumerate(trainer.checkpoint_callback.best_k_models.items()):
-    #     m = T5FineTuner.load_from_checkpoint(path,hparams = args)
-        # m.model.save_pretrained("./finetune_t5")
+    for i, (path, _) in enumerate(trainer.checkpoint_callback.best_k_models.items()):
+        m = T5FineTuner.load_from_checkpoint(path,hparams = args)
+        m.model.save_pretrained("./finetune_t5")
     # wandb.finish()
 
 

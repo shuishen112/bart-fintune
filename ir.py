@@ -1,11 +1,11 @@
 import pyterrier as pt
 import pandas as pd 
-pt.init()
-# pt.logging("INFO")
+from pyterrier.measures import * 
+pt.init(version = 5.5,helper_version = "0.0.6",home_dir = "/data/ceph/zhansu/data/msmarco")
+pt.logging("INFO")
 
 # *************************获得trec-covid 数据集合
 
-# dataset = pt.datasets.get_dataset('irds:cord19/trec-covid')
 
 # indexer = pt.index.IterDictIndexer('./cord19-index')
 # indexref = indexer.index(dataset.get_corpus_iter(), fields=('title', 'abstract'))
@@ -113,7 +113,7 @@ def msmarco_generate():
         for l in corpusfile:
             docno, passage = l.split("\t")
             yield {"docno": docno, "text": passage}
-# iter_indexer = pt.IterDictIndexer("./passage_index_8", threads = 8)
+# iter_indexer = pt.IterDictIndexer("./passage_index_50", threads = 50)
 # indexref3 = iter_indexer.index(msmarco_generate(), meta=["docno","text"], meta_lengths = [20,4096])
 
 index = pt.IndexFactory.of("./passage_index_8")
@@ -134,22 +134,23 @@ BM25_br = pt.BatchRetrieve(index, wmodel="BM25") % 10
 
 # 测试数据
 
-# from pyterrier.measures import * 
-# result = pt.Experiment(
-#     [BM25_br],
-#     dataset.get_topics("dev.small"),
-    
-#     dataset.get_qrels("dev.small"),
-#     eval_metrics=[RR(rel = 1)])
+qrels = dataset.get_qrels("dev.small")
+
+querys = dataset.get_topics("dev.small")[:10]
+print(qrels.head())
+result = pt.Experiment(
+    [BM25_br],
+    querys,
+    qrels,
+    eval_metrics=[RR(rel = 1)])
 
 
 # # print(len(dataset.get_topics("dev")))
 # print(len(dataset.get_topics("dev.small")))
-# print(result)
+print(result)
+
 
 ######################### 载入T5模型，用T5模型生成query################
-
-
 
 from IR_transformers.modeling_t5 import T5ForConditionalGeneration
 from IR_transformers.tokenization_t5 import T5Tokenizer
@@ -160,26 +161,21 @@ tokenizer = T5Tokenizer.from_pretrained("./t5_finetune_model")
 input_ids = tokenizer('how are glacier caves formed ?', return_tensors='pt').input_ids
 labels = tokenizer('A glacier cave is a cave formed within the ice of a glacier .', return_tensors='pt').input_ids
 
-# loss = model(input_ids = input_ids, labels = labels).loss
-# print("loss:", loss)
-
 def generate_query(row):
     original_query = row['query']
     print(original_query)
     input_ids = tokenizer(original_query,return_tensors = "pt").input_ids
     beam_output = model.generate(
     input_ids,
-    max_length=10,
+    max_length=12,
     num_beams=5,
     early_stopping=True
     )
 
     return tokenizer.decode(beam_output[0], skip_special_tokens=True)
 
-querys = dataset.get_topics("dev.small")[:10]
-
 querys["query_write"] = querys.apply(generate_query,axis = 1)
-# querys.columns = ["qid","original_query","query"]
+querys.columns = ["qid","original_query","query"]
 print(querys.head())
 print(len(querys))
 

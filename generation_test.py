@@ -1,9 +1,12 @@
+import os
+os.environ['http_proxy']="http://star-proxy.oa.com:3128"
+os.environ['https_proxy']="http://star-proxy.oa.com:3128"
 from IR_transformers.modeling_t5 import T5ForConditionalGeneration
 from IR_transformers.tokenization_t5 import T5Tokenizer
 import torch
-import logging 
-model = T5ForConditionalGeneration.from_pretrained("/data/ceph/zhansu/embedding/t5-small")
-tokenizer = T5Tokenizer.from_pretrained("/data/ceph/zhansu/embedding/t5-small")
+import logging
+model = T5ForConditionalGeneration.from_pretrained("t5-small")
+tokenizer = T5Tokenizer.from_pretrained("t5-small")
 
 
 input_ids = tokenizer('how are glacier caves formed ?', return_tensors='pt').input_ids

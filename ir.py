@@ -1,8 +1,21 @@
+import os
+os.environ['http_proxy']="http://star-proxy.oa.com:3128"
+os.environ['https_proxy']="http://star-proxy.oa.com:3128"
+
 import pyterrier as pt
 import pandas as pd 
 from pyterrier.measures import * 
-pt.init(version = 5.5,helper_version = "0.0.6",home_dir = "/data/ceph/zhansu/data/msmarco")
-pt.logging("INFO")
+import argparse
+from gensim.utils import tokenize as gensim_tokenize
+
+import nltk
+# nltk.download("stopwords")
+
+pt.init(version = 5.5,helper_version = "0.0.6", home_dir = "/data/ceph/zhansu/data/msmarco")
+# pt.logging("INFO")
+
+# from nltk.corpus import stopwords
+# en_stop_words = stopwords.words("english")
 
 # *************************获得trec-covid 数据集合
 
@@ -116,14 +129,29 @@ def msmarco_generate():
 # iter_indexer = pt.IterDictIndexer("./passage_index_50", threads = 50)
 # indexref3 = iter_indexer.index(msmarco_generate(), meta=["docno","text"], meta_lengths = [20,4096])
 
-index = pt.IndexFactory.of("./passage_index_8")
+index = pt.IndexFactory.of("./passage_index_50")
 print(index.getCollectionStatistics().toString())
 
-BM25_br = pt.BatchRetrieve(index, wmodel="BM25") % 10
+BM25_br = pt.BatchRetrieve(index, metadata = ["docno","text"], wmodel="BM25") % 10
 
-# 测试单个query
-# res = BM25_br.search("are you ok")
-# print(res)
+
+querys = dataset.get_topics("train")[:10]
+qrels = dataset.get_qrels("train")
+
+
+# # 测试单个query
+# res = BM25_br.transform(querys)
+# print(res.head())
+
+# eval = pt.Utils.evaluate(res,qrels,metrics = ['map'], perquery = True)
+# print(eval)
+
+
+# for _, row in querys.iterrows():
+#     query = row['query']
+#     res = BM25_br.search("query")
+#     print(res)
+
 
 # qrels = dataset.get_qrels("train")
 # print("len qrels",len(qrels))
@@ -134,55 +162,189 @@ BM25_br = pt.BatchRetrieve(index, wmodel="BM25") % 10
 
 # 测试数据
 
-qrels = dataset.get_qrels("dev.small")
+# qrels = dataset.get_qrels("dev.small")
 
-querys = dataset.get_topics("dev.small")[:10]
-print(qrels.head())
-result = pt.Experiment(
-    [BM25_br],
-    querys,
-    qrels,
-    eval_metrics=[RR(rel = 1)])
+# querys = dataset.get_topics("dev.small")
+# # print(querys)
+# result = pt.Experiment(
+#     [BM25_br],
+#     querys,
+#     qrels,
+#     eval_metrics=[RR(rel = 1)])
 
 
 # # print(len(dataset.get_topics("dev")))
 # print(len(dataset.get_topics("dev.small")))
-print(result)
-
 
 ######################### 载入T5模型，用T5模型生成query################
 
 from IR_transformers.modeling_t5 import T5ForConditionalGeneration
 from IR_transformers.tokenization_t5 import T5Tokenizer
 
-model = T5ForConditionalGeneration.from_pretrained("./t5_finetune_model")
-tokenizer = T5Tokenizer.from_pretrained("./t5_finetune_model")
+from torch.utils.data import Dataset, DataLoader
+from nlp import Dataset as nlp_dataset
 
-input_ids = tokenizer('how are glacier caves formed ?', return_tensors='pt').input_ids
-labels = tokenizer('A glacier cave is a cave formed within the ice of a glacier .', return_tensors='pt').input_ids
+model = T5ForConditionalGeneration.from_pretrained("./msmarco_finetune_t5")
+tokenizer = T5Tokenizer.from_pretrained("./msmarco_finetune_t5")
 
-def generate_query(row):
-    original_query = row['query']
-    print(original_query)
-    input_ids = tokenizer(original_query,return_tensors = "pt").input_ids
-    beam_output = model.generate(
-    input_ids,
-    max_length=12,
-    num_beams=5,
-    early_stopping=True
+querys = dataset.get_topics("dev.small")[:100]
+
+class msmarco_test(Dataset):
+    def __init__(self, tokenizer, input_length, num_samples):
+        self.input_length = input_length
+        self.dataset = nlp_dataset.from_pandas(querys)
+        self.tokenizer = tokenizer
+
+        if num_samples:
+            self.dataset = self.dataset.select(list(range(0,num_samples)))
+    def __len__(self):
+        return self.dataset.shape[0]
+
+    def clean_text(self, text):
+        
+        text = text.replace('Example of text:', '')
+        text = text.replace('Example of Summary:', '')
+        text = text.replace('\n', '')
+        text = text.replace('``', '')
+        text = text.replace('"', '')
+        return text
+
+    def convert_to_features(self, example_batch):
+
+        input_ = self.clean_text(example_batch['query'])
+
+        source = self.tokenizer.batch_encode_plus([input_], max_length=self.input_length,
+                                                  padding="max_length", truncation=True, return_tensors="pt")
+        return input_, source, example_batch['qid']
+
+    def __getitem__(self, index):
+        input_, source, qid = self.convert_to_features(self.dataset[index])
+        source_ids = source["input_ids"].squeeze()
+        src_mask = source["attention_mask"].squeeze()
+        return {"input":input_,"source_ids": source_ids, "source_mask": src_mask,"qid":qid}
+
+args_dict = dict(
+    max_input_length = 15,
+    test_batch_size = 5
+)
+
+args = argparse.Namespace(**args_dict)
+
+test_dataset = msmarco_test(tokenizer = tokenizer,input_length = args.max_input_length, num_samples = 20)
+test_dataloader = DataLoader(test_dataset, batch_size = args.test_batch_size)
+
+
+def clean(text):
+    text = text.lower()
+    tokens = gensim_tokenize(text)
+    text = " ".join(tokens)
+    return text
+def lmap(f, x):
+    """list(map(f, x))"""
+    return list(map(f, x))
+
+def ids_to_clean_text(generated_ids):
+    gen_text = tokenizer.batch_decode(
+        generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
     )
+    
+    return lmap(clean, gen_text)
 
-    return tokenizer.decode(beam_output[0], skip_special_tokens=True)
+qids = []
+original_querys = []
+query_rewrite = []
 
-querys["query_write"] = querys.apply(generate_query,axis = 1)
-querys.columns = ["qid","original_query","query"]
-print(querys.head())
-print(len(querys))
+for batch in test_dataloader:
 
-from pyterrier.measures import * 
+    generated_ids = model.generate(
+            batch["source_ids"],
+            attention_mask=batch["source_mask"],
+            use_cache=True,
+            max_length=15,
+            num_beams=2,
+            repetition_penalty=2.5,
+            length_penalty=1.0,
+            early_stopping=True
+        )
+    pred = ids_to_clean_text(generated_ids)
+
+    for i in range(len(batch)):
+        print("原始query",batch['input'][i])
+        print("重写query",pred[i])
+
+    print(["*"]*20)
+
+    qids.extend(batch['qid'])
+    original_querys.extend(batch['input'])
+    query_rewrite.extend(pred)
+
+df_pred = pd.DataFrame({"qid":qids,"query_rewrite":query_rewrite,"original_querys":original_querys})
+
+df_pred["merge_query"] = df_pred['original_querys'] + " " + df_pred["query_rewrite"]
+
+
+df_query_test_origin = df_pred[['qid',"original_querys"]].rename(columns = {"qid":"qid", "original_querys":"query"})
+
+df_query_test_rewirte = df_pred[['qid',"merge_query"]].rename(columns = {"qid":"qid","merge_query":"query"})
+
+print(df_query_test_origin)
+print(df_query_test_rewirte)
+
+
+# def generate_query(row):
+#     original_query = row['query']
+#     input_ids = tokenizer(original_query,return_tensors = "pt").input_ids
+#     beam_output = model.generate(
+#     input_ids,
+#     max_length=10,
+#     num_beams=5,
+#     early_stopping=True
+#     )
+
+#     text = tokenizer.decode(beam_output[0], skip_special_tokens=True)
+#     tokens = gensim_tokenize(text)
+#     # tokens = [t for t in tokens if t not in en_stop_words]
+#     return " ".join(tokens)
+
+
+
+
+# querys["query_write"] = querys.apply(generate_query,axis = 1)
+# querys.columns = ["qid","original_query","query"]
+
+# for e,row in querys.iterrows():
+#     print("原始query",row['query'])
+#     print("重写query",row["query_write"])
+
+
+qrel = dataset.get_qrels("dev.small")
+
+res_origin = BM25_br.transform(df_query_test_origin)
+print(res_origin.head())
+
+
+
+eval_origin = pt.Utils.evaluate(res_origin,dataset.get_qrels("dev.small"),metrics = ['map'], perquery = True)
+print("eval_origin",len(eval_origin))
+
+rewrite_origin =  BM25_br.transform(df_query_test_rewirte)
+eval_rewrite = pt.Utils.evaluate(rewrite_origin,dataset.get_qrels("dev.small"),metrics = ['map'], perquery = True)
+print("eval_rewrite",len(eval_rewrite))
+
+for e,qid in enumerate(df_pred['qid'].to_list()):
+    print(e, eval_origin[qid],eval_rewrite[qid])
+
 result = pt.Experiment(
     [BM25_br],
-    querys,
+    df_query_test_origin,
+    dataset.get_qrels("dev.small"),
+    eval_metrics=[RR(rel = 1)])
+
+print(result)
+
+result = pt.Experiment(
+    [BM25_br],
+    df_query_test_rewirte,
     dataset.get_qrels("dev.small"),
     eval_metrics=[RR(rel = 1)])
 

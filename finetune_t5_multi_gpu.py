@@ -1,14 +1,18 @@
-# import wandb
+import wandb
 import pytorch_lightning as pl
+import os
+os.environ['http_proxy']="http://star-proxy.oa.com:3128"
+os.environ['https_proxy']="http://star-proxy.oa.com:3128"
 from transformers import get_linear_schedule_with_warmup
 from nlp import list_datasets
 from nlp import load_dataset
 from nlp import Dataset as nlp_dataset
 from IR_transformers.modeling_t5 import T5ForConditionalGeneration
 from IR_transformers.tokenization_t5 import T5Tokenizer
+from nlp import load_metric
 
 
-from pytorch_lightning.loggers import TensorBoardLogger,WandbLogger
+from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from torch.utils.data import Dataset, DataLoader
 
 from pytorch_lightning.plugins import DDPPlugin
@@ -16,7 +20,7 @@ import torch.nn as nn
 import torch
 import numpy as np
 import pandas as pd
-from nltk.tokenize import sent_tokenize
+# from nltk.tokenize import sent_tokenize
 import argparse
 import glob
 import os
@@ -27,8 +31,7 @@ import random
 import re
 from itertools import chain
 from string import punctuation
-import nltk
-import wandb
+# import nltk
 my_num_workers = os.cpu_count()
 
 FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -37,7 +40,7 @@ logging.basicConfig(level = logging.INFO, format=FORMAT)
 logger = logging.getLogger(__name__)
 
 wandb_logger = WandbLogger(project="msmarco")
-tb_logger = TensorBoardLogger("/data/ceph/zhansu/logs/")
+tb_logger = TensorBoardLogger("/data/ceph/zhansu/logs/",name = "msmarco")
 
 df = pd.read_csv("/data/ceph/zhansu/data/msmarco/doc_query_pairs.train.tsv",
                  sep='\t', names=["doc", "query"])
@@ -74,7 +77,8 @@ class msmarco(Dataset):
         text = text.replace('\n', '')
         text = text.replace('``', '')
         text = text.replace('"', '')
-
+        text = text.replace("?", "")
+        
         return text
 
     def convert_to_features(self, example_batch):
@@ -124,12 +128,12 @@ args_dict = dict(
     eval_batch_size=64,
     num_train_epochs=3,
     gradient_accumulation_steps=8,
-    n_gpu=8,
+    n_gpu=1,
     resume_from_checkpoint=None,
     val_check_interval=0.5,
-    n_val=-1,
-    n_train=-1,
-    n_test=-1,
+    n_val=100,
+    n_train=100,
+    n_test=100,
     early_stop_callback=False,
     fp_16=False,  # if you want to enable 16-bit training then install apex and set this to true
     opt_level='O1',  # you can find out more on optimisation levels here https://nvidia.github.io/apex/amp.html#opt-levels-and-properties
@@ -141,8 +145,8 @@ args_dict = dict(
 # tokenizer = T5Tokenizer.from_pretrained('t5-small')
 
 # 获取数据
-args_dict.update({'output_dir': 't5_msmarco', 'num_train_epochs': 15,
-                 'train_batch_size': 256, 'eval_batch_size':256})
+args_dict.update({'output_dir': 't5_msmarco', 'num_train_epochs': 5,
+                 'train_batch_size': 32, 'eval_batch_size':32})
 args = argparse.Namespace(**args_dict)
 # print(args_dict)
 
@@ -270,8 +274,8 @@ class T5FineTuner(pl.LightningModule):
 
         loss = self._step(batch)
         base_metrics = {'val_loss': loss}
-        self.log("val_loss", loss,
-                 on_step=True, prog_bar=True, logger=True)
+        # self.log("val_loss", loss,
+        #          on_step=True, prog_bar=True, logger=True)
 #         rouge: Dict = self.calc_generative_metrics(preds, target)
         # summ_len = np.mean(self.lmap(len, generated_ids))
         # base_metrics.update(gen_time=gen_time,
@@ -287,7 +291,7 @@ class T5FineTuner(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         loss = self._step(batch)
         # logging.info("train step batch_idx:{}".format(batch_idx))
-        self.log("train_loss", loss, on_step=True, on_epoch = True, prog_bar=True, logger=True)
+        
         return {"loss": loss}
     # if our trainning using a accelerator the splits data from each batch GPU, we need to implement the training_step_end method
 
@@ -296,11 +300,17 @@ class T5FineTuner(pl.LightningModule):
         # losses from each GPU
         # logging.info("the batch loss from gpu:{}".format(batch_parts['loss']))
         losses = batch_parts["loss"]
+        mean_loss = torch.mean(losses)
+
+        logging.info("train loss step each gpu:{}".format(losses))
+        print("train loss step mean {}".format(mean_loss.grad))
+        self.log("train_loss", mean_loss, on_step=True, on_epoch = True, prog_bar=True, logger=True)
         # do something with both outputs
-        return {"loss":torch.mean(losses)}
+        return {"loss":mean_loss}
 
     def training_epoch_end(self, training_step_outputs):
-        print(training_step_outputs)
+        logging.info("train loss each epoch{}".format(training_step_outputs))
+        # print(training_step_outputs)
         avg_train_loss = torch.stack([x["loss"] for x in training_step_outputs]).mean()
         # tensorboard_logs = {"avg_train_loss": avg_train_loss}
         self.log("avg_train_loss", avg_train_loss,
@@ -311,6 +321,12 @@ class T5FineTuner(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         return self._generative_step(batch)
+    def validation_step_end(self, batch_parts):
+        losses = batch_parts["val_loss"]
+        mean_loss = torch.mean(losses)
+        self.log("val_loss", mean_loss, on_step=True, on_epoch = True, prog_bar=True, logger=True)
+
+        return {"val_loss":mean_loss}
 
     def test_step(self,batch,batch_idx):
         loss = self._step(batch)
@@ -461,7 +477,7 @@ train_params = dict(
     logger = tb_logger,
     callbacks=[LoggingCallback(),checkpoint_callback],
     accelerator = "dp",
-    # overfit_batches=10
+    # overfit_batches=3
     # fast_dev_run=100
 )
 
@@ -476,9 +492,8 @@ if __name__ == "__main__":
     trainer.test(model,ckpt_path="best")
 
     print(trainer.checkpoint_callback.best_k_models.items())
-    for i, (path, _) in enumerate(trainer.checkpoint_callback.best_k_models.items()):
-        m = T5FineTuner.load_from_checkpoint(path,hparams = args)
-        m.model.save_pretrained("./finetune_t5")
+    # for i, (path, _) in enumerate(trainer.checkpoint_callback.best_k_models.items()):
+    #     m = T5FineTuner.load_from_checkpoint(path,hparams = args)
+        # m.model.save_pretrained("./finetune_t5")
     # wandb.finish()
-
 

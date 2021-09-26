@@ -9,8 +9,12 @@ from IR_transformers.tokenization_t5 import T5Tokenizer
 import argparse
 from torch.utils.data import Dataset, DataLoader,random_split
 import torch
+from torch import nn
 import numpy as np 
 import logging
+from tensorboardX import SummaryWriter
+
+
 
 FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(level = logging.INFO, format=FORMAT)
@@ -35,6 +39,7 @@ df_test = df[~msk]
 
 
 model = T5ForConditionalGeneration.from_pretrained("/data/ceph/zhansu/embedding/t5-small")
+
 tokenizer = T5Tokenizer.from_pretrained("/data/ceph/zhansu/embedding/t5-small")
 
 class msmarco(Dataset):
@@ -105,17 +110,20 @@ def get_dataset(tokenizer, type_path, num_samples, args):
 args_dict = dict(
     max_input_length = 150,
     max_output_length = 512,
-    train_batch_size = 25,
-    test_batch_size = 25,
-    num_train_epochs = 2
+    train_batch_size = 64,
+    test_batch_size = 64,
+    num_train_epochs = 50,
+    multi_gpu = True,
+    num_samples = None
 )
 
+writer = SummaryWriter(logdir = "/data/ceph/zhansu/logs/msmarco/version_batch_size_{}".format(64))
 args = argparse.Namespace(**args_dict)
 
 
 
-train_dataset = get_dataset(tokenizer = tokenizer,type_path= "train",num_samples = 200, args = args)
-test_dataset = get_dataset(tokenizer = tokenizer,type_path = "test", num_samples = 200,args = args)
+train_dataset = get_dataset(tokenizer = tokenizer,type_path= "train",num_samples = args.num_samples, args = args)
+test_dataset = get_dataset(tokenizer = tokenizer,type_path = "test", num_samples = args.num_samples, args = args)
 
 train_dataloader = DataLoader(train_dataset, batch_size = args.train_batch_size)
 test_dataloader = DataLoader(test_dataset, batch_size = args.test_batch_size)
@@ -126,27 +134,46 @@ optimizer = torch.optim.Adam(model.parameters(), lr = 1e-3)
 model.train()
 
 if torch.cuda.is_available():
+    # 是否使用multi gpus
+    if args.multi_gpu:
+        model = nn.DataParallel(model)
     model.cuda()
 
 
 for epoch in range(args.num_train_epochs):
     logger.info("epoch:{}".format(epoch))
     model.train()
+
+    train_loss = []
     # train loop
     for e, train_batch in enumerate(train_dataloader):
         lm_labels = train_batch["target_ids"]
         lm_labels[lm_labels[:,:] == tokenizer.pad_token_id] = -100
 
+        input_ids = train_batch["source_ids"]
+        attention_mask = train_batch['source_mask']
+        labels = lm_labels
+        decoder_attention_mask = train_batch['target_mask']
 
-        outputs = model(input_ids = train_batch["source_ids"].cuda(),
-        attention_mask = train_batch['source_mask'].cuda(),
-        labels = lm_labels.cuda(),
-        decoder_attention_mask = train_batch['target_mask'].cuda()
+        if torch.cuda.is_available():
+            input_ids = input_ids.cuda()
+            attention_mask = attention_mask.cuda()
+            labels = labels.cuda()
+            decoder_attention_mask = decoder_attention_mask.cuda()
+
+
+        outputs = model(input_ids = input_ids,
+        attention_mask = attention_mask,
+        labels = labels,
+        decoder_attention_mask = decoder_attention_mask
         )
 
         loss = outputs[0]
+        loss = torch.mean(loss)
+        # print(loss)s
 
-
+        train_loss.append(loss)
+        
         # 1 计算反向传播的值
         loss.backward()
         # 2 反向传播更新梯度
@@ -154,7 +181,7 @@ for epoch in range(args.num_train_epochs):
         # 3 将梯度清零
         optimizer.zero_grad()
         logger.info("train loss:{}".format(loss.item()))
-
+    writer.add_scalar("Loss/train", torch.mean(torch.tensor(train_loss)), epoch)
     # eval model
     model.eval()
     with torch.no_grad():
@@ -170,9 +197,13 @@ for epoch in range(args.num_train_epochs):
             decoder_attention_mask = test_batch['target_mask'].cuda()
             )
 
-            loss = outputs[0]
-            test_loss.append(loss)
+            val_loss = outputs[0]
 
+            val_loss = torch.mean(val_loss)
+            test_loss.append(val_loss)
+        writer.add_scalar("Loss/test", torch.mean(torch.tensor(test_loss)), epoch)
         logger.info("test loss:{}".format(torch.mean(torch.tensor(test_loss))))
-    model.save_pretrained("./t5_finetune_model")
+if isinstance(model, nn.DataParallel):
+    model = model.module
+model.save_pretrained("./t5_finetune_model")
         

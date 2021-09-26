@@ -8,4 +8,5 @@ nlp
 pytorch-lightning
 rouge_score
 wandb
-pyhton-terrier
+python-terrier
+tensorboardX

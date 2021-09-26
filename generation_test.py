@@ -1,3 +1,6 @@
+import os
+os.environ['http_proxy']="http://star-proxy.oa.com:3128"
+os.environ['https_proxy']="http://star-proxy.oa.com:3128"
 from IR_transformers.modeling_t5 import T5ForConditionalGeneration
 from IR_transformers.tokenization_t5 import T5Tokenizer
 import torch

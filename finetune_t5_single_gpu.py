@@ -1,14 +1,17 @@
-# import wandb
+import wandb
+import pytorch_lightning as pl
 from transformers import get_linear_schedule_with_warmup
 from nlp import list_datasets
 from nlp import load_dataset
 from nlp import Dataset as nlp_dataset
 from IR_transformers.modeling_t5 import T5ForConditionalGeneration
 from IR_transformers.tokenization_t5 import T5Tokenizer
-from nlp import load_metric
-from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
+
+
+from pytorch_lightning.loggers import TensorBoardLogger,WandbLogger
 from torch.utils.data import Dataset, DataLoader
-import pytorch_lightning as pl
+
+from pytorch_lightning.plugins import DDPPlugin
 import torch.nn as nn
 import torch
 import numpy as np
@@ -26,27 +29,59 @@ from itertools import chain
 from string import punctuation
 import nltk
 import wandb
-nltk.download('punkt')
+my_num_workers = os.cpu_count()
 
-wandb_logger = WandbLogger(project="msmarco")
-tb_logger = TensorBoardLogger("logs/")
+import os
+os.environ['http_proxy']="http://star-proxy.oa.com:3128"
+os.environ['https_proxy']="http://star-proxy.oa.com:3128"
 
-df = pd.read_csv("/root/program/ir_data/doc_query_pairs.train.tsv",
+FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+logging.basicConfig(level = logging.INFO, format=FORMAT)
+
+logger = logging.getLogger(__name__)
+data_corpus = "wiki"
+
+wandb_logger = WandbLogger(project=data_corpus)
+tb_logger = TensorBoardLogger("/data/ceph/zhansu/logs/",name = data_corpus)
+
+def load_msmarco_dataset():
+
+    df = pd.read_csv("/data/ceph/zhansu/data/msmarco/doc_query_pairs.train.tsv",
                  sep='\t', names=["doc", "query"])
-msk = np.random.rand(len(df)) < 0.8
 
-df_train = df[msk]
-df_test = df[~msk]
+    df_train, df_validate, df_test = \
+              np.split(df.sample(frac=1, random_state=42), 
+                       [int(.6*len(df)), int(.8*len(df))])
+    return df_train,df_validate,df_test
+
+def load_wiki_dataset():
+    df_train = pd.read_csv("/data/ceph/zhansu/data/wiki_clean/train.txt",sep = '\t',names = ['query',"doc",'flag'],quoting = 3)
+    df_validate = pd.read_csv("/data/ceph/zhansu/data/wiki_clean/dev.txt",sep = "\t",names = ['query','doc','flag'],quoting = 3)
+    df_test = pd.read_csv("/data/ceph/zhansu/data/wiki_clean/test.txt",sep = "\t",names = ['query','doc','flag'],quoting = 3)
+    df_train_true = df_train[df_train["flag"] ==1]
+    df_validate_true = df_validate[df_validate['flag'] == 1]
+    df_test_true = df_test[df_test['flag'] == 1]
+    return df_train_true,df_validate_true,df_test_true
+
+
+
+if data_corpus == "wiki":
+    df_train,df_validate,df_test = load_wiki_dataset()
+
+elif data_corpus == "msmarco":
+    df_train,df_validate,df_test = load_msmarco_dataset()
+
+print(df_train.head())
 
 
 class msmarco(Dataset):
     def __init__(self, tokenizer, type_path, num_samples, input_length, output_length, print_text=False):
-        # self.dataset = load_dataset(
-        #     'wikihow', 'all', data_dir='../summary_dataset/', split=type_path)
 
         if type_path == 'train':
             self.dataset = nlp_dataset.from_pandas(df_train)
         elif type_path == "validation":
+            self.dataset = nlp_dataset.from_pandas(df_validate)
+        elif type_path == "test":
             self.dataset = nlp_dataset.from_pandas(df_test)
         if num_samples:
             self.dataset = self.dataset.select(list(range(0, num_samples)))
@@ -59,6 +94,7 @@ class msmarco(Dataset):
         return self.dataset.shape[0]
 
     def clean_text(self, text):
+        
         text = text.replace('Example of text:', '')
         text = text.replace('Example of Summary:', '')
         text = text.replace('\n', '')
@@ -96,54 +132,29 @@ class msmarco(Dataset):
 
 # Load dataset using NLP
 
-'''
-datasets_list = list_datasets()
-print(', '.join(dataset.id for dataset in datasets_list))
-
-dataset = load_dataset('wikihow', 'all', data_dir='../summary_dataset/')
-print("Size of train dataset: ", dataset['train'].shape)
-print("Size of Validation dataset: ", dataset['validation'].shape)
-print("Size of ca test dataset: ", dataset['test'].shape)
-print(dataset['train'][0].keys())
-
-# 测试一下数据
-tokenizer = T5Tokenizer.from_pretrained('t5-small')
-dataset = wikihow(tokenizer, "validation", None, 512, 150, True)
-print(len(dataset))
-
-data = dataset[50]
-print()
-print("Shape of Tokenized Text: ", data['source_ids'].shape)
-print()
-print("Sanity check - Decode Text: ", tokenizer.decode(data['source_ids']))
-print("====================================")
-print("Sanity check - Decode Summary: ", tokenizer.decode(data['target_ids']))
-
-'''
 # 获取arguments
 
 args_dict = dict(
-    output_dir="",  # path to save the checkpoints
-    model_name_or_path='./t5_finetune_model',
-    tokenizer_name_or_path='./t5_finetune_model',
-    max_input_length=512,
-    max_output_length=150,
-    freeze_encoder=False,
-    freeze_embeds=False,
-    learning_rate=3e-4,
+    output_dir="./",  # path to save the checkpoints
+    model_name_or_path='/data/ceph/zhansu/embedding/t5-small',
+    tokenizer_name_or_path='/data/ceph/zhansu/embedding/t5-small',
+    max_input_length=15,
+    max_output_length=200,
+
+    learning_rate=1e-3,
     weight_decay=0.0,
     adam_epsilon=1e-8,
     warmup_steps=0,
-    train_batch_size=4,
-    eval_batch_size=4,
-    num_train_epochs=2,
+    train_batch_size=128,
+    eval_batch_size=128,
+    num_train_epochs=3,
     gradient_accumulation_steps=8,
-    n_gpu=1,
+    n_gpu=8,
     resume_from_checkpoint=None,
-    val_check_interval=0.05,
-    n_val=10,
-    n_train=10,
-    n_test=10,
+    val_check_interval=0.5,
+    n_val=2000,
+    n_train=-1,
+    n_test=2000,
     early_stop_callback=False,
     fp_16=False,  # if you want to enable 16-bit training then install apex and set this to true
     opt_level='O1',  # you can find out more on optimisation levels here https://nvidia.github.io/apex/amp.html#opt-levels-and-properties
@@ -155,10 +166,10 @@ args_dict = dict(
 # tokenizer = T5Tokenizer.from_pretrained('t5-small')
 
 # 获取数据
-args_dict.update({'output_dir': 't5_msmarco', 'num_train_epochs': 2,
-                 'train_batch_size': 4, 'eval_batch_size': 4})
+args_dict.update({'output_dir': data_corpus, 'num_train_epochs': 20,
+                 'train_batch_size': 256, 'eval_batch_size':256})
 args = argparse.Namespace(**args_dict)
-print(args_dict)
+# print(args_dict)
 
 
 def get_dataset(tokenizer, type_path, num_samples, args):
@@ -188,13 +199,7 @@ class T5FineTuner(pl.LightningModule):
             hparams.model_name_or_path)
         self.tokenizer = T5Tokenizer.from_pretrained(
             hparams.tokenizer_name_or_path)
-        self.rouge_metric = load_metric('rouge')
-
-        if self.hparams_tmp.freeze_embeds:
-            self.freeze_embeds()
-        if self.hparams_tmp.freeze_encoder:
-            self.freeze_params(self.model.get_encoder())
-            # assert_all_frozen(self.model.get_encoder())
+        # self.rouge_metric = load_metric('rouge')
 
         n_observations_per_split = {
             "train": self.hparams_tmp.n_train,
@@ -203,22 +208,6 @@ class T5FineTuner(pl.LightningModule):
         }
         self.n_obs = {k: v if v >= 0 else None for k,
                       v in n_observations_per_split.items()}
-
-    def freeze_params(self, model):
-        for par in model.parameters():
-            par.requires_grad = False
-
-    def freeze_embeds(self):
-        """Freeze token embeddings and positional embeddings for bart, just token embeddings for t5."""
-        try:
-            self.freeze_params(self.model.model.shared)
-            for d in [self.model.model.encoder, self.model.model.decoder]:
-                freeze_params(d.embed_positions)
-                freeze_params(d.embed_tokens)
-        except AttributeError:
-            self.freeze_params(self.model.shared)
-            for d in [self.model.encoder, self.model.decoder]:
-                self.freeze_params(d.embed_tokens)
 
     def lmap(self, f, x):
         """list(map(f, x))"""
@@ -265,32 +254,32 @@ class T5FineTuner(pl.LightningModule):
 
     def _generative_step(self, batch):
 
-        t0 = time.time()
+        # t0 = time.time()
 
-        generated_ids = self.model.generate(
-            batch["source_ids"],
-            attention_mask=batch["source_mask"],
-            use_cache=True,
-            decoder_attention_mask=batch['target_mask'],
-            max_length=150,
-            num_beams=2,
-            repetition_penalty=2.5,
-            length_penalty=1.0,
-            early_stopping=True
-        )
-        preds = self.ids_to_clean_text(generated_ids)
-        print(preds)
-        target = self.ids_to_clean_text(batch["target_ids"])
+        # generated_ids = self.model.generate(
+        #     batch["source_ids"],
+        #     attention_mask=batch["source_mask"],
+        #     use_cache=True,
+        #     decoder_attention_mask=batch['target_mask'],
+        #     max_length=150,
+        #     num_beams=2,
+        #     repetition_penalty=2.5,
+        #     length_penalty=1.0,
+        #     early_stopping=True
+        # )
+        # preds = self.ids_to_clean_text(generated_ids)
+        # target = self.ids_to_clean_text(batch["target_ids"])
 
-        gen_time = (time.time() - t0) / batch["source_ids"].shape[0]
+        # gen_time = (time.time() - t0) / batch["source_ids"].shape[0]
 
         loss = self._step(batch)
         base_metrics = {'val_loss': loss}
+        self.log("val_loss", loss,on_step=False, on_epoch = True,prog_bar=True, logger=True)
 #         rouge: Dict = self.calc_generative_metrics(preds, target)
-        summ_len = np.mean(self.lmap(len, generated_ids))
-        base_metrics.update(gen_time=gen_time,
-                            gen_len=summ_len, preds=preds, target=target)
-        self.rouge_metric.add_batch(preds, target)
+        # summ_len = np.mean(self.lmap(len, generated_ids))
+        # base_metrics.update(gen_time=gen_time,
+        #                     gen_len=summ_len, preds=preds, target=target)
+        # self.rouge_metric.add_batch(preds, target)
 
         # rouge_results = self.rouge_metric.compute()
         # rouge_dict = self.parse_score(rouge_results)
@@ -300,98 +289,126 @@ class T5FineTuner(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss = self._step(batch)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        # return loss
+        return {"loss": loss}
+    # if our trainning using a accelerator the splits data from each batch GPU, we need to implement the training_step_end method
 
-        tensorboard_logs = {"train_loss": loss}
-        self.log("train_loss", loss, on_step=True,
-                 on_epoch=True, prog_bar=True, logger=True)
-        return {"loss": loss, "log": tensorboard_logs}
+    def training_step_end(self, batch_parts):
+        # predictions from each GPU
+        # losses from each GPU
+        # logging.info("the batch loss from gpu:{}".format(batch_parts['loss']))
+        losses = batch_parts["loss"]
+        self.log("train_loss", torch.mean(losses), on_step=True, on_epoch = True, prog_bar=True, logger=True)
+        return {"loss":torch.mean(losses)}
 
-    def training_epoch_end(self, outputs):
-        avg_train_loss = torch.stack([x["loss"] for x in outputs]).mean()
-        tensorboard_logs = {"avg_train_loss": avg_train_loss}
+    def training_epoch_end(self, training_step_outputs):
+
+        avg_train_loss = torch.stack([x["loss"] for x in training_step_outputs]).mean()
+        # tensorboard_logs = {"avg_train_loss": avg_train_loss}
         self.log("avg_train_loss", avg_train_loss,
                  on_epoch=True, prog_bar=True, logger=True)
-        # self.logger.experiment.add_scalar("avg_train_loss", avg_train_loss, self.current_epoch)
-
-        # return {"avg_train_loss": avg_train_loss, "log": tensorboard_logs, 'progress_bar': tensorboard_logs}
-
     def validation_step(self, batch, batch_idx):
+        
         return self._generative_step(batch)
 
-    def validation_epoch_end(self, outputs):
+    def validation_step_end(self,batch_parts):
+        losses = batch_parts["val_loss"]
+        self.log("val_loss_all_gpu", torch.mean(losses), on_step=True, on_epoch = True, prog_bar=True, logger=True)
+        return {"val_loss_step":torch.mean(losses)}
 
-        avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
-        self.log("val_loss", avg_loss, on_epoch=True, prog_bar=True, logger=True)
-        # tensorboard_logs = {"val_loss": avg_loss}
+    def test_step(self,batch,batch_idx):
+        
+        loss = self._step(batch)
+        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        return {"test_loss": loss}
+    
+    # def test_step_end(self, batch_parts):
+    #     # predictions from each GPU
+    #     # losses from each GPU
+    #     # logging.info("the batch loss from gpu:{}".format(batch_parts['loss']))
+    #     losses = batch_parts["loss"]
+    #     # do something with both outputs
+    #     return {"loss":torch.mean(losses)}
 
-        # rouge_results = self.rouge_metric.compute()
-        # rouge_dict = self.parse_score(rouge_results)
+    # def validation_epoch_end(self, validation_step_outputs):
 
-        # tensorboard_logs.update(
-        #     rouge1=rouge_dict['rouge1'], rougeL=rouge_dict['rougeL'])
+    #     avg_loss = torch.stack([x["val_loss_step"] for x in validation_step_outputs]).mean()
+    #     self.log("avg_val_loss", avg_loss, on_epoch=True, prog_bar=True, logger=True)
+    #     # tensorboard_logs = {"val_loss": avg_loss}
 
-        # Clear out the lists for next epoch
-        self.target_gen = []
-        self.prediction_gen = []
-        # self.log("rouge1",rouge_results['rouge1'],on_epoch=True, prog_bar=True, logger=True)
-        # self.log("rougeL",rouge_results['rougeL'],on_epoch=True, prog_bar=True, logger=True)
+    #     # rouge_results = self.rouge_metric.compute()
+    #     # rouge_dict = self.parse_score(rouge_results)
 
-        # return {"avg_val_loss": avg_loss,
-        #         "rouge1": rouge_results['rouge1'],
-        #         "rougeL": rouge_results['rougeL'],
-        #         "log": tensorboard_logs, 'progress_bar': tensorboard_logs}
+    #     # tensorboard_logs.update(
+    #     #     rouge1=rouge_dict['rouge1'], rougeL=rouge_dict['rougeL'])
+
+    #     # Clear out the lists for next epoch
+    #     self.target_gen = []
+    #     self.prediction_gen = []
+    #     # self.log("rouge1",rouge_results['rouge1'],on_epoch=True, prog_bar=True, logger=True)
+    #     # self.log("rougeL",rouge_results['rougeL'],on_epoch=True, prog_bar=True, logger=True)
+
+    #     # return {"avg_val_loss": avg_loss,
+    #     #         "rouge1": rouge_results['rouge1'],
+    #     #         "rougeL": rouge_results['rougeL'],
+    #     #         "log": tensorboard_logs, 'progress_bar': tensorboard_logs}
 
     def configure_optimizers(self):
         "Prepare optimizer and schedule (linear warmup and decay)"
 
         model = self.model
-        no_decay = ["bias", "LayerNorm.weight"]
-        optimizer_grouped_parameters = [
-            {
-                "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-                "weight_decay": self.hparams_tmp.weight_decay,
-            },
-            {
-                "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
-                "weight_decay": 0.0,
-            },
-        ]
-        optimizer = torch.optim.AdamW(
-            optimizer_grouped_parameters, lr=self.hparams_tmp.learning_rate, eps=self.hparams_tmp.adam_epsilon)
-        self.opt = optimizer
-        return [optimizer]
+        # no_decay = ["bias", "LayerNorm.weight"]
+        # optimizer_grouped_parameters = [
+        #     {
+        #         "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+        #         "weight_decay": self.hparams_tmp.weight_decay,
+        #     },
+        #     {
+        #         "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+        #         "weight_decay": 0.0,
+        #     },
+        # ]
 
-    def optimizer_step(self, epoch, batch_idx,
-                       optimizer, optimizer_idx, second_order_closure=None, on_tpu=False, using_native_amp=False, using_lbfgs=False):
-        # if self.trainer.use_tpu:
-        #     xm.optimizer_step(optimizer)
-        # else:
-        optimizer.step()
-        optimizer.zero_grad()
-        self.lr_scheduler.step()
+        optimizer = torch.optim.Adam(model.parameters(), lr = 1e-3)
+        # optimizer = torch.optim.AdamW(
+        #     optimizer_grouped_parameters, lr=self.hparams_tmp.learning_rate, eps=self.hparams_tmp.adam_epsilon)
 
-    def get_tqdm_dict(self):
-        tqdm_dict = {"loss": "{:.3f}".format(
-            self.trainer.avg_loss), "lr": self.lr_scheduler.get_last_lr()[-1]}
+        return optimizer
+        # self.opt = optimizer
+        # return [optimizer]
 
-        return tqdm_dict
+    # def optimizer_step(self, epoch, batch_idx,
+    #                    optimizer, optimizer_idx, second_order_closure=None, on_tpu=False, using_native_amp=False, using_lbfgs=False):
+    #     # if self.trainer.use_tpu:
+    #     #     xm.optimizer_step(optimizer)
+    #     # else:
+    #     optimizer.step()
+    #     optimizer.zero_grad()
+    #     self.lr_scheduler.step()
+
+    # def get_tqdm_dict(self):
+    #     tqdm_dict = {"loss": "{:.3f}".format(
+    #         self.trainer.avg_loss), "lr": self.lr_scheduler.get_last_lr()[-1]}
+
+    #     return tqdm_dict
 
     def train_dataloader(self):
         n_samples = self.n_obs['train']
         train_dataset = get_dataset(
             tokenizer=self.tokenizer, type_path="train", num_samples=n_samples, args=self.hparams_tmp)
         dataloader = DataLoader(train_dataset, batch_size=self.hparams_tmp.train_batch_size,
-                                drop_last=True, shuffle=True, num_workers=4)
-        t_total = (
-            (len(dataloader.dataset) // (self.hparams_tmp.train_batch_size *
-             max(1, self.hparams_tmp.n_gpu)))
-            // self.hparams_tmp.gradient_accumulation_steps
-            * float(self.hparams_tmp.num_train_epochs)
-        )
-        scheduler = get_linear_schedule_with_warmup(
-            self.opt, num_warmup_steps=self.hparams_tmp.warmup_steps, num_training_steps=t_total
-        )
-        self.lr_scheduler = scheduler
+                                drop_last=True, shuffle=True, num_workers=my_num_workers)
+        # t_total = (
+        #     (len(dataloader.dataset) // (self.hparams_tmp.train_batch_size *
+        #      max(1, self.hparams_tmp.n_gpu)))
+        #     // self.hparams_tmp.gradient_accumulation_steps
+        #     * float(self.hparams_tmp.num_train_epochs)
+        # )
+        # scheduler = get_linear_schedule_with_warmup(
+        #     self.opt, num_warmup_steps=self.hparams_tmp.warmup_steps, num_training_steps=t_total
+        # )
+        # self.lr_scheduler = scheduler
         return dataloader
 
     def val_dataloader(self):
@@ -399,19 +416,16 @@ class T5FineTuner(pl.LightningModule):
         validation_dataset = get_dataset(
             tokenizer=self.tokenizer, type_path="validation", num_samples=n_samples, args=self.hparams_tmp)
 
-        return DataLoader(validation_dataset, batch_size=self.hparams_tmp.eval_batch_size, num_workers=4)
+        return DataLoader(validation_dataset, batch_size=self.hparams_tmp.eval_batch_size, num_workers=my_num_workers)
 
     def test_dataloader(self):
         n_samples = self.n_obs['test']
         test_dataset = get_dataset(
             tokenizer=self.tokenizer, type_path="test", num_samples=n_samples, args=self.hparams_tmp)
 
-        return DataLoader(test_dataset, batch_size=self.hparams_tmp.eval_batch_size, num_workers=4)
+        return DataLoader(test_dataset, batch_size=self.hparams_tmp.eval_batch_size, num_workers=my_num_workers)
 
-
-logger = logging.getLogger(__name__)
-
-
+    
 class LoggingCallback(pl.Callback):
     def on_validation_end(self, trainer, pl_module):
         logger.info("***** Validation results *****")
@@ -429,8 +443,10 @@ class LoggingCallback(pl.Callback):
             metrics = trainer.callback_metrics
 
             # Log and save results to file
+            if not os.path.exists(pl_module.hparams_tmp.output_dir):
+                os.mkdir(pl_module.hparams_tmp.output_dir)
             output_test_results_file = os.path.join(
-                pl_module.hparams.output_dir, "test_results.txt")
+                pl_module.hparams_tmp.output_dir, "test_results.txt")
             with open(output_test_results_file, "w") as writer:
                 for key in sorted(metrics):
                     if key not in ["log", "progress_bar"]:
@@ -441,7 +457,7 @@ class LoggingCallback(pl.Callback):
 
 # Define Checkpoint function
 checkpoint_callback = pl.callbacks.ModelCheckpoint(
-    dirpath=args.output_dir, monitor="val_loss", mode="min", save_top_k=3
+    dirpath = args.output_dir + "_model", monitor="val_loss", mode="min", save_top_k=3
 )
 
 # If resuming from checkpoint, add an arg resume_from_checkpoint
@@ -453,18 +469,27 @@ train_params = dict(
     amp_level=args.opt_level,
     resume_from_checkpoint=args.resume_from_checkpoint,
     gradient_clip_val=args.max_grad_norm,
-    checkpoint_callback=True,
+    # checkpoint_callback=True,
     val_check_interval=args.val_check_interval,
-    # logger=wandb_logger,
+    logger=wandb_logger,
     # logger = tb_logger,
-    callbacks=[LoggingCallback()],
+    callbacks=[LoggingCallback(),checkpoint_callback],
+    accelerator = "dp",
+    # overfit_batches=3,
 )
 
 ##################### Train Model ###################
 
+if __name__ == "__main__":
 
-model = T5FineTuner(args)
+    model = T5FineTuner(args)
 
-trainer = pl.Trainer(**train_params)
-trainer.fit(model)
-# wandb.finish()
+    trainer = pl.Trainer(**train_params)
+    trainer.fit(model)
+    trainer.test(model,ckpt_path="best")
+
+    print(trainer.checkpoint_callback.best_k_models.items())
+    for i, (path, _) in enumerate(trainer.checkpoint_callback.best_k_models.items()):
+        m = T5FineTuner.load_from_checkpoint(path,hparams = args)
+        m.model.save_pretrained("./{}_finetune_t5".format(data_corpus))
+    wandb.finish()

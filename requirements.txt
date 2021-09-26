@@ -7,3 +7,6 @@ sentencepiece
 nlp
 pytorch-lightning
 rouge_score
+wandb
+python-terrier
+tensorboardX

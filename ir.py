@@ -1,6 +1,4 @@
 import os
-os.environ['http_proxy']="http://star-proxy.oa.com:3128"
-os.environ['https_proxy']="http://star-proxy.oa.com:3128"
 
 import pyterrier as pt
 import pandas as pd 

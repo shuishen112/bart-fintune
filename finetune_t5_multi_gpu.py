@@ -1,8 +1,6 @@
 import wandb
 import pytorch_lightning as pl
 import os
-os.environ['http_proxy']="http://star-proxy.oa.com:3128"
-os.environ['https_proxy']="http://star-proxy.oa.com:3128"
 from transformers import get_linear_schedule_with_warmup
 from nlp import list_datasets
 from nlp import load_dataset

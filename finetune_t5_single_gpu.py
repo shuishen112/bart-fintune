@@ -32,8 +32,7 @@ import wandb
 my_num_workers = os.cpu_count()
 
 import os
-os.environ['http_proxy']="http://star-proxy.oa.com:3128"
-os.environ['https_proxy']="http://star-proxy.oa.com:3128"
+
 
 FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(level = logging.INFO, format=FORMAT)

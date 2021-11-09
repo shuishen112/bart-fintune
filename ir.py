@@ -4,12 +4,13 @@ import pyterrier as pt
 import pandas as pd 
 from pyterrier.measures import * 
 import argparse
-from gensim.utils import tokenize as gensim_tokenize
+# from gensim.utils import tokenize as gensim_tokenize
 
-import nltk
+# import nltk
 # nltk.download("stopwords")
 
-pt.init(version = 5.5,helper_version = "0.0.6", home_dir = "/data/ceph/zhansu/data/msmarco")
+# pt.init(version = 5.5,helper_version = "0.0.6", home_dir = "/data/ceph/zhansu/data/msmarco")
+pt.init()
 # pt.logging("INFO")
 
 # from nltk.corpus import stopwords
@@ -42,18 +43,18 @@ pt.init(version = 5.5,helper_version = "0.0.6", home_dir = "/data/ceph/zhansu/da
 
 #************************ 进行textscorer的测试 ******************************
 
-df = pd.DataFrame(
-    [
-        ["q1", "chemical reactions", "d1", "professor protor poured the chemicals"],
-        ["q1", "chemical reactions",  "d2", "chemical brothers turned up the beats"],
-    ], columns=["qid", "query", "docno","text"])
+# df = pd.DataFrame(
+#     [
+#         ["q1", "chemical reactions", "d1", "professor protor poured the chemicals"],
+#         ["q1", "chemical reactions",  "d2", "chemical brothers turned up the beats"],
+#     ], columns=["qid", "query", "docno","text"])
 
-print(df)
-textscorer = pt.batchretrieve.TextScorer(takes="docs", body_attr="text", wmodel="BM25")
-rtr = textscorer.transform(df)
-print(rtr)
+# print(df)
+# textscorer = pt.batchretrieve.TextScorer(takes="docs", body_attr="text", wmodel="BM25")
+# rtr = textscorer.transform(df)
+# print(rtr)
 
-exit()
+# exit()
 # data = pd.read_csv("/root/program/WikiQACorpus/WikiQA-train.tsv",sep = '\t',quoting = 3)
 # print(data.head)
 # train_data = data[['QuestionID','Question','SentenceID','Sentence']]
@@ -102,21 +103,21 @@ exit()
 # print(result)
 
 # ************************对单个query进行检索******************
-print(BM25_br.search("Light"))
+# print(BM25_br.search("Light"))
 
 
-print(dataset.get_qrels("train"))
+# print(dataset.get_qrels("train"))
 
-topics = dataset.get_topics("test-2020")
+# topics = dataset.get_topics("test-2020")
 
-res = BM25_br.transform(topics)
-print(res.head())
+# res = BM25_br.transform(topics)
+# print(res.head())
 
 
-qrels = dataset.get_qrels("test-2020")
-eval = pt.Utils.evaluate(res,qrels,metrics = ['map'], perquery = True)
-print(len(eval))
-print(len(topics))
+# qrels = dataset.get_qrels("test-2020")
+# eval = pt.Utils.evaluate(res,qrels,metrics = ['map'], perquery = True)
+# print(len(eval))
+# print(len(topics))
 
 
 # ************************对Msmarco Passage Ranking ******************
@@ -127,17 +128,19 @@ def msmarco_generate():
         for l in corpusfile:
             docno, passage = l.split("\t")
             yield {"docno": docno, "text": passage}
-# iter_indexer = pt.IterDictIndexer("./passage_index_50", threads = 50)
-# indexref3 = iter_indexer.index(msmarco_generate(), meta=["docno","text"], meta_lengths = [20,4096])
+iter_indexer = pt.IterDictIndexer("./passage_index_50", threads = 20)
+indexref3 = iter_indexer.index(msmarco_generate(), meta=["docno","text"], meta_lengths = [20,4096])
 
-index = pt.IndexFactory.of("./passage_index_50")
-print(index.getCollectionStatistics().toString())
+print(indexref3.getCollectionStatistics().toString())
+# index = pt.IndexFactory.of("./passage_index_50")
+# print(index.getCollectionStatistics().toString())
+exit()
 
-BM25_br = pt.BatchRetrieve(index, metadata = ["docno","text"], wmodel="BM25") % 10
+# BM25_br = pt.BatchRetrieve(index, metadata = ["docno","text"], wmodel="BM25") % 10
 
 
-querys = dataset.get_topics("train")[:10]
-qrels = dataset.get_qrels("train")
+# querys = dataset.get_topics("train")[:10]
+# qrels = dataset.get_qrels("train")
 
 
 # # 测试单个query

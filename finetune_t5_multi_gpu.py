@@ -195,14 +195,14 @@ class T5FineTuner(pl.LightningModule):
     def freeze_params(self, model):
         for par in model.parameters():
             par.requires_grad = False
-
+    
     def freeze_embeds(self):
         """Freeze token embeddings and positional embeddings for bart, just token embeddings for t5."""
         try:
             self.freeze_params(self.model.model.shared)
             for d in [self.model.model.encoder, self.model.model.decoder]:
-                freeze_params(d.embed_positions)
-                freeze_params(d.embed_tokens)
+                self.freeze_params(d.embed_positions)
+                self.freeze_params(d.embed_tokens)
         except AttributeError:
             self.freeze_params(self.model.shared)
             for d in [self.model.encoder, self.model.decoder]:

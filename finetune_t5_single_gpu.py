@@ -4,8 +4,11 @@ from transformers import get_linear_schedule_with_warmup
 from nlp import list_datasets
 from nlp import load_dataset
 from nlp import Dataset as nlp_dataset
+from nlp import load_metric
+
 from IR_transformers.modeling_t5 import T5ForConditionalGeneration
 from IR_transformers.tokenization_t5 import T5Tokenizer
+from transformers import BartForConditionalGeneration, BartTokenizer
 
 
 from pytorch_lightning.loggers import TensorBoardLogger,WandbLogger
@@ -39,9 +42,10 @@ logging.basicConfig(level = logging.INFO, format=FORMAT)
 
 logger = logging.getLogger(__name__)
 data_corpus = "wiki"
+model_name = "bart-large"
 
 wandb_logger = WandbLogger(project=data_corpus)
-tb_logger = TensorBoardLogger("/data/ceph/zhansu/logs/",name = data_corpus)
+tb_logger = TensorBoardLogger("/data/zhansu/bart_finetune/logs/",name = data_corpus)
 
 def load_msmarco_dataset():
 
@@ -54,9 +58,9 @@ def load_msmarco_dataset():
     return df_train,df_validate,df_test
 
 def load_wiki_dataset():
-    df_train = pd.read_csv("/data/ceph/zhansu/data/wiki_clean/train.txt",sep = '\t',names = ['query',"doc",'flag'],quoting = 3)
-    df_validate = pd.read_csv("/data/ceph/zhansu/data/wiki_clean/dev.txt",sep = "\t",names = ['query','doc','flag'],quoting = 3)
-    df_test = pd.read_csv("/data/ceph/zhansu/data/wiki_clean/test.txt",sep = "\t",names = ['query','doc','flag'],quoting = 3)
+    df_train = pd.read_csv("/data/zhansu/data/wiki/train.txt",sep = '\t',names = ['query',"doc",'flag'],quoting = 3)
+    df_validate = pd.read_csv("/data/zhansu/data/wiki/dev.txt",sep = "\t",names = ['query','doc','flag'],quoting = 3)
+    df_test = pd.read_csv("/data/zhansu/data/wiki/test.txt",sep = "\t",names = ['query','doc','flag'],quoting = 3)
     df_train_true = df_train[df_train["flag"] ==1]
     df_validate_true = df_validate[df_validate['flag'] == 1]
     df_test_true = df_test[df_test['flag'] == 1]
@@ -135,11 +139,11 @@ class msmarco(Dataset):
 
 args_dict = dict(
     output_dir="./",  # path to save the checkpoints
-    model_name_or_path='/data/ceph/zhansu/embedding/t5-small',
-    tokenizer_name_or_path='/data/ceph/zhansu/embedding/t5-small',
+    model_name_or_path='/data/lxk/DownloadPretrainedModel/t5-small',
+    tokenizer_name_or_path='/data/lxk/DownloadPretrainedModel/t5-small',
     max_input_length=15,
     max_output_length=200,
-
+    freeze_embeds = True,
     learning_rate=1e-3,
     weight_decay=0.0,
     adam_epsilon=1e-8,
@@ -165,8 +169,8 @@ args_dict = dict(
 # tokenizer = T5Tokenizer.from_pretrained('t5-small')
 
 # 获取数据
-args_dict.update({'output_dir': data_corpus, 'num_train_epochs': 20,
-                 'train_batch_size': 256, 'eval_batch_size':256})
+args_dict.update({'output_dir': data_corpus, 'num_train_epochs': 10,
+                 'train_batch_size': 32, 'eval_batch_size':32})
 args = argparse.Namespace(**args_dict)
 # print(args_dict)
 
@@ -194,12 +198,23 @@ class T5FineTuner(pl.LightningModule):
     def __init__(self, hparams):
         super(T5FineTuner, self).__init__()
         self.hparams_tmp = hparams
-        self.model = T5ForConditionalGeneration.from_pretrained(
-            hparams.model_name_or_path)
-        self.tokenizer = T5Tokenizer.from_pretrained(
-            hparams.tokenizer_name_or_path)
-        # self.rouge_metric = load_metric('rouge')
+        if model_name == "t5-small":
 
+            self.model = T5ForConditionalGeneration.from_pretrained(
+                hparams.model_name_or_path)
+            self.tokenizer = T5Tokenizer.from_pretrained(
+                hparams.tokenizer_name_or_path)
+        # self.rouge_metric = load_metric('rouge')
+        elif model_name == "bart-large":
+            self.model = BartForConditionalGeneration.from_pretrained(
+                "/data/lxk/DownloadPretrainedModel/bart-large"
+            )
+            self.tokenizer = BartTokenizer.from_pretrained(
+                "/data/lxk/DownloadPretrainedModel/bart-large"
+            )
+        if self.hparams_tmp.freeze_embeds:
+            print("freeze_embeddings")
+            self.freeze_embeds()
         n_observations_per_split = {
             "train": self.hparams_tmp.n_train,
             "validation": self.hparams_tmp.n_val,
@@ -207,7 +222,30 @@ class T5FineTuner(pl.LightningModule):
         }
         self.n_obs = {k: v if v >= 0 else None for k,
                       v in n_observations_per_split.items()}
-
+    def freeze_params(self,model, except_para=None):
+        if type(model) == dict:
+            for name, par in model.items():
+                if except_para is not None and except_para in name:
+                    par.requires_grad = True
+                else:
+                    par.requires_grad = False
+        else:
+            for name, par in model.named_parameters():
+                if except_para is not None and except_para in name:
+                    par.requires_grad = True
+                else:
+                    par.requires_grad = False
+    def freeze_embeds(self):
+        """Freeze token embeddings and positional embeddings for bart, just token embeddings for t5."""
+        try:
+            self.freeze_params(self.model.model.shared)
+            for d in [self.model.model.encoder, self.model.model.decoder]:
+                self.freeze_params(d.embed_positions)
+                self.freeze_params(d.embed_tokens)
+        except AttributeError:
+            self.freeze_params(self.model.shared)
+            for d in [self.model.encoder, self.model.decoder]:
+                self.freeze_params(d.embed_tokens)
     def lmap(self, f, x):
         """list(map(f, x))"""
         return list(map(f, x))
@@ -465,7 +503,7 @@ train_params = dict(
     gpus=args.n_gpu,
     max_epochs=args.num_train_epochs,
     precision=16 if args.fp_16 else 32,
-    amp_level=args.opt_level,
+    # amp_level=args.opt_level,
     resume_from_checkpoint=args.resume_from_checkpoint,
     gradient_clip_val=args.max_grad_norm,
     # checkpoint_callback=True,
@@ -488,7 +526,7 @@ if __name__ == "__main__":
     trainer.test(model,ckpt_path="best")
 
     print(trainer.checkpoint_callback.best_k_models.items())
-    for i, (path, _) in enumerate(trainer.checkpoint_callback.best_k_models.items()):
-        m = T5FineTuner.load_from_checkpoint(path,hparams = args)
-        m.model.save_pretrained("./{}_finetune_t5".format(data_corpus))
-    wandb.finish()
+    # for i, (path, _) in enumerate(trainer.checkpoint_callback.best_k_models.items()):
+    #     m = T5FineTuner.load_from_checkpoint(path,hparams = args)
+    #     m.model.save_pretrained("./{}_finetune_t5".format(data_corpus))
+    # wandb.finish()

@@ -2,32 +2,43 @@ import os
 
 from IR_transformers.modeling_t5 import T5ForConditionalGeneration
 from IR_transformers.tokenization_t5 import T5Tokenizer
+from transformers import BartForConditionalGeneration, BartTokenizer
+
 import torch
 import logging
 import pyterrier as pt
 from pyterrier.measures import * 
 pt.init() 
-model = T5ForConditionalGeneration.from_pretrained("./t5_finetune_model")
-tokenizer = T5Tokenizer.from_pretrained("./t5_finetune_model")
+
+m = "bart-large"
+
+if m == "t5-small":
+    model = T5ForConditionalGeneration.from_pretrained("/data/lxk/DownloadPretrainedModel/t5-small")
+    tokenizer = T5Tokenizer.from_pretrained("/data/lxk/DownloadPretrainedModel/t5-small")
+elif m == "bart-large":
+    model = BartForConditionalGeneration.from_pretrained("/data/lxk/DownloadPretrainedModel/bart-large")
+    tokenizer = BartTokenizer.from_pretrained("/data/lxk/DownloadPretrainedModel/bart-large")
 
 
-dataset = pt.datasets.get_dataset("trec-deep-learning-passages")
-index = pt.IndexFactory.of("./passage_index_8")
-print(index.getCollectionStatistics().toString())
+labels = tokenizer('A glacier cave is a cave formed within the ice of a glacier .', return_tensors='pt').input_ids
 
-BM25_br = pt.BatchRetrieve(index, metadata = ["docno","text"], wmodel="BM25") % 10
+# dataset = pt.datasets.get_dataset("trec-deep-learning-passages")
+# index = pt.IndexFactory.of("./passage_index_50")
+# print(index.getCollectionStatistics().toString())
 
-result = pt.Experiment(
-    [BM25_br],
-    dataset.get_topics("dev.small"),
+# BM25_br = pt.BatchRetrieve(index, metadata = ["docno","text"], wmodel="BM25") % 10
+
+# result = pt.Experiment(
+#     [BM25_br],
+#     dataset.get_topics("dev.small"),
     
-    dataset.get_qrels("dev.small"),
-    eval_metrics=[RR(rel = 1)])
+#     dataset.get_qrels("dev.small"),
+#     eval_metrics=[RR(rel = 1)])
 
 
-# print(len(dataset.get_topics("dev")))
-print(len(dataset.get_topics("dev.small")))
-print(result)
+# # print(len(dataset.get_topics("dev")))
+# print(len(dataset.get_topics("dev.small")))
+# print(result)
 
 
 input_ids = tokenizer('how are glacier caves formed ?', return_tensors='pt').input_ids

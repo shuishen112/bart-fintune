@@ -1,21 +1,23 @@
-# import wandb
+import wandb
+import pytorch_lightning as pl
 from transformers import get_linear_schedule_with_warmup
 from nlp import list_datasets
 from nlp import load_dataset
 from nlp import Dataset as nlp_dataset
-from IR_transformers.modeling_t5 import T5ForConditionalGeneration
-from IR_transformers.tokenization_t5 import T5Tokenizer
+# from IR_transformers.modeling_t5 import T5ForConditionalGeneration
+# from IR_transformers.tokenization_t5 import T5Tokenizer
 from transformers import BartForConditionalGeneration, BartTokenizer
-
+from transformers import T5ForConditionalGeneration,T5Tokenizer
 from nlp import load_metric
-from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from torch.utils.data import Dataset, DataLoader
-import pytorch_lightning as pl
+
+from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
+
 import torch.nn as nn
 import torch
 import numpy as np
 import pandas as pd
-from nltk.tokenize import sent_tokenize
+from gensim.utils import tokenize as gensim_tokenize
 import argparse
 import glob
 import os
@@ -29,39 +31,65 @@ from string import punctuation
 import nltk
 import wandb
 import pyterrier as pt
-pt.init() 
+pt.init(version = 5.6,helper_version="0.0.6") 
+pt.set_property("termpipelines", "")
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+
 # nltk.download('punkt')
 
-wandb_logger = WandbLogger(project="msmarco")
+wandb_logger = WandbLogger(project="wiki_map")
 tb_logger = TensorBoardLogger("logs/")
 
-trec_dataset = pt.datasets.get_dataset("trec-deep-learning-passages")
+def remove_the_unanswered_sample(df):
+    """
+    clean the dataset
+            :param df: dataframe
+    """
+    counter = df.groupby("Question").apply(lambda group: sum(group["Label"]))
+    questions_have_correct = counter[counter > 0].index
+    counter = df.groupby("Question").apply(
+        lambda group: sum(group["Label"] == 0))
+    questions_have_uncorrect = counter[counter > 0].index
+    counter = df.groupby("Question").apply(lambda group: len(group["Label"]))
+    questions_multi = counter[counter > 1].index
 
-index = pt.IndexFactory.of("./passage_index_8")
-print(index.getCollectionStatistics().toString())
+    return df[df["Question"].isin(questions_have_correct) & df["Question"].isin(questions_have_uncorrect)].reset_index()
+def load_dataset(data_name):
+    
+    train_data = pd.read_csv("/data/zhansu/data/WikiQACorpus/WikiQA-{}.tsv".format(data_name),sep = '\t',quoting = 3)
+    train_data = remove_the_unanswered_sample(train_data)
+    train_qrel = train_data[['QuestionID',"SentenceID","Label"]]
+    train_qrel.columns = ['qid','docno','label']
 
-BM25_br = pt.BatchRetrieve(index, metadata = ["docno","text"], wmodel="BM25") % 10
+    train_data = train_data[['QuestionID','Question','SentenceID','Sentence','Label']]
 
-qrels_train = trec_dataset.get_qrels("train")
+    train_data.columns = ['qid','query','docno','text','label']
 
-def clean_text(text):
-    text = text.replace('Example of text:', '')
-    text = text.replace('Example of Summary:', '')
-    text = text.replace('\n', '')
-    text = text.replace('``', '')
-    text = text.replace('"', '')
-    text = text.replace(".","")
-    text = text.replace("'","")
+    # 对query进行预处理
+    def clean(row):
+        text = row['query'].lower()
+        tokens = list(gensim_tokenize(text))
+        text = " ".join(tokens)
+        return text
 
-    return text
+    train_data['query'] = train_data.apply(clean,axis = 1)
 
-class msmarco(Dataset):
+    return train_data, train_qrel
+
+train_data, train_qrel = load_dataset("train")
+dev_data, dev_qrel = load_dataset("dev")
+test_data, test_qrel = load_dataset("test")
+
+
+class wiki_dataset(Dataset):
     def __init__(self, tokenizer, type_path, num_samples, input_length, print_text=False):
 
         if type_path == 'train':
-            self.dataset = nlp_dataset.from_pandas(trec_dataset.get_topics("train"))
+            self.dataset = nlp_dataset.from_pandas(train_data)
         elif type_path == "validation":
-            self.dataset = nlp_dataset.from_pandas(trec_dataset.get_topics("train"))
+            self.dataset = nlp_dataset.from_pandas(dev_data)
+        elif type_path == "test":
+            self.dataset = nlp_dataset.from_pandas(test_data)
         if num_samples:
             self.dataset = self.dataset.select(list(range(0, num_samples)))
         self.input_length = input_length
@@ -72,45 +100,51 @@ class msmarco(Dataset):
         return self.dataset.shape[0]
 
     def clean_text(self, text):
-        text = text.replace('Example of text:', '')
-        text = text.replace('Example of Summary:', '')
-        text = text.replace('\n', '')
-        text = text.replace('``', '')
-        text = text.replace('"', '')
-
+        text = text.replace('?', '')
         return text
 
     def convert_to_features(self, example_batch):
         if self.print_text:
             print("Input Text: ", self.clean_text(example_batch['query']))
 
-        input_ = self.clean_text(example_batch['query'])
+        input_ = example_batch['query']
     
         source = self.tokenizer.batch_encode_plus([input_], max_length=self.input_length,
                                                   padding="max_length", truncation=True, return_tensors="pt")
         qid = example_batch['qid']
+        docno = example_batch['docno']
+        text = example_batch['text']
+        label = example_batch['label']
 
-        return input_, source, qid
+        return input_, qid, docno, text, label, source
     def __getitem__(self, index):
-        input_, source, qid = self.convert_to_features(self.dataset[index])
+        input_, qid, docno, text, label, source = self.convert_to_features(self.dataset[index])
 
         source_ids = source["input_ids"].squeeze()
 
         src_mask = source["attention_mask"].squeeze()
 
-        return {"input":input_, "source_ids": source_ids, "source_mask": src_mask, "qid": qid}
 
+        return {"input":input_, "source_ids": source_ids, "source_mask": src_mask, "qid": qid,
+        "docno":docno,"text":text, "label":label}
+
+# 对初始的文档进行BM25检索后看一下结果
+textscorer = pt.batchretrieve.TextScorer(takes="docs", body_attr="text", wmodel="BM25")
+res_test = textscorer.transform(test_data)
+test_result = pt.Utils.evaluate(res_test,test_qrel,metrics = ["map"])
+
+print(test_result)
 
 # 获取arguments
 
 args_dict = dict(
     output_dir="",  # path to save the checkpoints
-    model_name_or_path='./t5_finetune_model',
-    tokenizer_name_or_path='./t5_finetune_model',
-    max_input_length=150,
+    model_name_or_path='/data/lxk/DownloadPretrainedModel/t5-small',
+    tokenizer_name_or_path='/data/lxk/DownloadPretrainedModel/t5-small',
+    max_input_length=15,
     max_output_length=150,
     freeze_encoder=False,
-    freeze_embeds=False,
+    freeze_embeds=True,
     learning_rate=3e-4,
     weight_decay=0.0,
     adam_epsilon=1e-8,
@@ -134,14 +168,14 @@ args_dict = dict(
 )
 
 # 获取数据
-args_dict.update({'output_dir': 't5_msmarco', 'num_train_epochs': 2,
-                 'train_batch_size': 4, 'eval_batch_size': 4})
+args_dict.update({'output_dir': 'wiki_reinforce', 'num_train_epochs':20,
+                 'train_batch_size': 10, 'eval_batch_size': 10})
 args = argparse.Namespace(**args_dict)
 print(args_dict)
 
 
 def get_dataset(tokenizer, type_path, num_samples, args):
-    return msmarco(tokenizer=tokenizer, type_path=type_path, num_samples=num_samples,  input_length=args.max_input_length)
+    return wiki_dataset(tokenizer=tokenizer, type_path=type_path, num_samples=num_samples,  input_length=args.max_input_length)
 
 
 ################### Define Model ############################
@@ -157,6 +191,10 @@ def set_seed(seed):
 
 set_seed(42)
 
+def clean_text(text):
+    tokens = list(gensim_tokenize(text))
+    text = " ".join(tokens)
+    return text
 
 class T5FineTuner(pl.LightningModule):
     def __init__(self, hparams):
@@ -166,7 +204,7 @@ class T5FineTuner(pl.LightningModule):
             hparams.model_name_or_path)
         self.tokenizer = T5Tokenizer.from_pretrained(
             hparams.tokenizer_name_or_path)
-        self.rouge_metric = load_metric('rouge')
+        # self.rouge_metric = load_metric('rouge')
 
         if self.hparams_tmp.freeze_embeds:
             self.freeze_embeds()
@@ -191,8 +229,8 @@ class T5FineTuner(pl.LightningModule):
         try:
             self.freeze_params(self.model.model.shared)
             for d in [self.model.model.encoder, self.model.model.decoder]:
-                freeze_params(d.embed_positions)
-                freeze_params(d.embed_tokens)
+                self.freeze_params(d.embed_positions)
+                self.freeze_params(d.embed_tokens)
         except AttributeError:
             self.freeze_params(self.model.shared)
             for d in [self.model.encoder, self.model.decoder]:
@@ -208,7 +246,7 @@ class T5FineTuner(pl.LightningModule):
     def parse_score(self, result):
         return {k: round(v.mid.fmeasure * 100, 4) for k, v in result.items()}
 
-    def _generative_train(self, batch):
+    def generation_decode(self, batch):
         # 训练集合中的生成
         t0 = time.time()
 
@@ -216,7 +254,7 @@ class T5FineTuner(pl.LightningModule):
             batch["source_ids"],
             attention_mask=batch["source_mask"],
             use_cache=True,
-            max_length=5,
+            max_length=15,
             num_beams=2,
             repetition_penalty=2.5,
             length_penalty=1.0,
@@ -243,23 +281,15 @@ class T5FineTuner(pl.LightningModule):
         
 
         qid = batch['qid']
-
-        input_querys = batch['input']
+        docno = batch['docno']
+        text = batch['text']
+        label = batch['label'].detach().cpu().numpy()
 
         # 根据source_id 生成querys,从而获得每个生成query在检索中的map值
-        generated_querys = self._generative_train(batch)
+        generated_querys = self.generation_decode(batch)
 
-        topic_train = pd.DataFrame({"qid":qid, "query":generated_querys})
 
-        res = BM25_br.transform(topic_train)
-
-        eval_result = pt.Utils.evaluate(res,qrels_train,metrics = ['map'], perquery = True)
-
-        map_scores = [eval_result[q]['map'] if q in eval_result else 0.0 for q in qid]
-
-        target_scores = torch.tensor(map_scores)
-                
-        # 根据生成的query获得其概率值
+         # 根据生成的query获得其概率值
         target_tokenize = self.tokenizer.batch_encode_plus(generated_querys, max_length=args.max_input_length,
                                                   padding="max_length", truncation=True, return_tensors="pt")
 
@@ -272,17 +302,35 @@ class T5FineTuner(pl.LightningModule):
 
         logits = outputs['logits']
 
+        # print("len generated_querys",len(generated_querys))
+        topic_train = pd.DataFrame({"qid":qid, "query":generated_querys,
+        "docno":docno,"text":text,'label':label})
+
+        # 将label等于1的text 直接作为生成的query作为一个强正向的reward
+
+        topic_train.loc[topic_train.label == 1, "query"] = topic_train.loc[topic_train.label == 1,"text"]
+
+        topic_train['query'] = topic_train['query'].apply(clean_text)
+        res = textscorer.transform(topic_train)
+
+        eval_result = pt.Utils.evaluate(res,train_qrel,metrics = ['map'], perquery = True)
+
+        map_scores = [eval_result[q]['map'] if q in eval_result else 0.0 for q in qid]
+
+        target_scores = torch.tensor(map_scores)
+                
         m = torch.nn.Softmax(dim = 2)
         softmax_score = m(logits)
         # 这个scores是生成的概率
         scores = torch.prod(torch.max(softmax_score,2).values,1)
         target_scores = target_scores.type_as(scores)
 
+        print("scores:{}---- target_scores:{}".format(scores,target_scores))
         # 生成loss,我们用map作为reward来训练我们的生成模型
         loss_fn = torch.nn.MSELoss()
         loss = loss_fn(target_scores,scores)
         
-        return loss
+        return loss,np.mean(map_scores)
 
     def ids_to_clean_text(self, generated_ids):
         gen_text = self.tokenizer.batch_decode(
@@ -294,13 +342,26 @@ class T5FineTuner(pl.LightningModule):
 
     def _generative_step(self, batch):
 
-        loss = self._step(batch)
+        # preds = self.generation_decode(batch)
+        # target = self.ids_to_clean_text(batch['target_ids'])
+        loss, map_score = self._step(batch)
         base_metrics = {'val_loss': loss}
+
+        print("mapscore dev:{}".format(map_score))
+        # self.rouge_metric.add_batch(preds,target)
+        # rouge_results = self.rouge_metric.compute()
+        # rouge_dict = self.parse_score(rouge_results)
+
+        # self.log("rouge1",rouge_results['rouge1'],on_epoch=True, prog_bar=True, logger=True)
+        # self.log("rougeL",rouge_results['rougeL'],on_epoch=True, prog_bar=True, logger=True)
+
+        # base_metrics.update(rouge1=rouge_dict['rouge1'], rougeL=rouge_dict['rougeL'])
+
         return base_metrics
 
     def training_step(self, batch, batch_idx):
-        loss = self._step(batch)
-
+        loss, map_score = self._step(batch)
+        print("map_score train:{}".format(map_score))
         tensorboard_logs = {"train_loss": loss}
         self.log("train_loss", loss, on_step=True,
                  on_epoch=True, prog_bar=True, logger=True)
@@ -322,7 +383,16 @@ class T5FineTuner(pl.LightningModule):
 
         avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
         self.log("val_loss", avg_loss, on_epoch=True, prog_bar=True, logger=True)
-        # tensorboard_logs = {"val_loss": avg_loss}
+        tensorboard_logs = {"val_loss": avg_loss}
+
+        # summ_len = np.mean(self.lmap(len, generated_ids))
+        # base_metrics.update(gen_time=gen_time,
+        #                     gen_len=summ_len, preds=preds, target=target)
+        # self.rouge_metric.add_batch(preds, target)
+
+        # rouge_results = self.rouge_metric.compute()
+        # rouge_dict = self.parse_score(rouge_results)
+        # base_metrics.update(rouge1=rouge_dict['rouge1'], rougeL=rouge_dict['rougeL'])
 
         # rouge_results = self.rouge_metric.compute()
         # rouge_dict = self.parse_score(rouge_results)
@@ -345,28 +415,31 @@ class T5FineTuner(pl.LightningModule):
         "Prepare optimizer and schedule (linear warmup and decay)"
 
         model = self.model
-        no_decay = ["bias", "LayerNorm.weight"]
-        optimizer_grouped_parameters = [
-            {
-                "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-                "weight_decay": self.hparams_tmp.weight_decay,
-            },
-            {
-                "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
-                "weight_decay": 0.0,
-            },
-        ]
-        optimizer = torch.optim.AdamW(
-            optimizer_grouped_parameters, lr=self.hparams_tmp.learning_rate, eps=self.hparams_tmp.adam_epsilon)
-        self.opt = optimizer
-        return [optimizer]
+        # no_decay = ["bias", "LayerNorm.weight"]
+        # optimizer_grouped_parameters = [
+        #     {
+        #         "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+        #         "weight_decay": self.hparams_tmp.weight_decay,
+        #     },
+        #     {
+        #         "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+        #         "weight_decay": 0.0,
+        #     },
+        # ]
+        # optimizer = torch.optim.AdamW(
+        #     optimizer_grouped_parameters, lr=self.hparams_tmp.learning_rate, eps=self.hparams_tmp.adam_epsilon)
+        # self.opt = optimizer
+        optimizer = torch.optim.Adam(model.parameters(), lr = 1e-3)
 
-    def optimizer_step(self, epoch, batch_idx,
-                       optimizer, optimizer_idx, second_order_closure=None, on_tpu=False, using_native_amp=False, using_lbfgs=False):
+        return optimizer
 
-        optimizer.step()
-        optimizer.zero_grad()
-        self.lr_scheduler.step()
+    # def optimizer_step(self, epoch, batch_idx,
+    #                    optimizer, optimizer_idx, second_order_closure=None, on_tpu=False, using_native_amp=False, using_lbfgs=False):
+
+    #     optimizer.step(second_order_closure)
+    #     torch.cuda.empty_cache()
+    #     # optimizer.zero_grad()
+    #     # self.lr_scheduler.step()
 
     def get_tqdm_dict(self):
         tqdm_dict = {"loss": "{:.3f}".format(
@@ -380,16 +453,16 @@ class T5FineTuner(pl.LightningModule):
             tokenizer=self.tokenizer, type_path="train", num_samples=n_samples, args=self.hparams_tmp)
         dataloader = DataLoader(train_dataset, batch_size=self.hparams_tmp.train_batch_size,
                                 drop_last=True, shuffle=True, num_workers=4)
-        t_total = (
-            (len(dataloader.dataset) // (self.hparams_tmp.train_batch_size *
-             max(1, self.hparams_tmp.n_gpu)))
-            // self.hparams_tmp.gradient_accumulation_steps
-            * float(self.hparams_tmp.num_train_epochs)
-        )
-        scheduler = get_linear_schedule_with_warmup(
-            self.opt, num_warmup_steps=self.hparams_tmp.warmup_steps, num_training_steps=t_total
-        )
-        self.lr_scheduler = scheduler
+        # t_total = (
+        #     (len(dataloader.dataset) // (self.hparams_tmp.train_batch_size *
+        #      max(1, self.hparams_tmp.n_gpu)))
+        #     // self.hparams_tmp.gradient_accumulation_steps
+        #     * float(self.hparams_tmp.num_train_epochs)
+        # )
+        # scheduler = get_linear_schedule_with_warmup(
+        #     self.opt, num_warmup_steps=self.hparams_tmp.warmup_steps, num_training_steps=t_total
+        # )
+        # self.lr_scheduler = scheduler
         return dataloader
 
     def val_dataloader(self):
@@ -448,7 +521,7 @@ train_params = dict(
     gpus=args.n_gpu,
     max_epochs=args.num_train_epochs,
     precision=16 if args.fp_16 else 32,
-    amp_level=args.opt_level,
+    # amp_level=args.opt_level,
     resume_from_checkpoint=args.resume_from_checkpoint,
     gradient_clip_val=args.max_grad_norm,
     checkpoint_callback=True,
@@ -456,13 +529,15 @@ train_params = dict(
     # logger=wandb_logger,
     # logger = tb_logger,
     callbacks=[LoggingCallback()],
+    accelerator = "dp",
 )
 
 ##################### Train Model ###################
 
+if __name__ == "__main__":
 
-model = T5FineTuner(args)
+    model = T5FineTuner(args)
 
-trainer = pl.Trainer(**train_params)
-trainer.fit(model)
-# wandb.finish()
+    trainer = pl.Trainer(**train_params)
+    trainer.fit(model)
+    wandb.finish()

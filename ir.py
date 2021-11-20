@@ -128,27 +128,26 @@ def msmarco_generate():
         for l in corpusfile:
             docno, passage = l.split("\t")
             yield {"docno": docno, "text": passage}
-iter_indexer = pt.IterDictIndexer("./passage_index_50", threads = 20)
-indexref3 = iter_indexer.index(msmarco_generate(), meta=["docno","text"], meta_lengths = [20,4096])
+# iter_indexer = pt.IterDictIndexer("./passage_index_50", threads = 20)
+# indexref3 = iter_indexer.index(msmarco_generate(), meta=["docno","text"], meta_lengths = [20,4096])
 
-print(indexref3.getCollectionStatistics().toString())
-# index = pt.IndexFactory.of("./passage_index_50")
-# print(index.getCollectionStatistics().toString())
-exit()
-
-# BM25_br = pt.BatchRetrieve(index, metadata = ["docno","text"], wmodel="BM25") % 10
+index = pt.IndexFactory.of("./passage_index_50")
+print(index.getCollectionStatistics().toString())
 
 
-# querys = dataset.get_topics("train")[:10]
-# qrels = dataset.get_qrels("train")
+BM25_br = pt.BatchRetrieve(index, metadata = ["docno","text"], wmodel="BM25") % 10
 
 
-# # 测试单个query
-# res = BM25_br.transform(querys)
-# print(res.head())
+querys = dataset.get_topics("train")[:10]
+qrels = dataset.get_qrels("train")
 
-# eval = pt.Utils.evaluate(res,qrels,metrics = ['map'], perquery = True)
-# print(eval)
+
+# 测试单个query
+res = BM25_br.transform(querys)
+print(res.head())
+
+eval = pt.Utils.evaluate(res,qrels,metrics = ['map'], perquery = True)
+print(eval)
 
 
 # for _, row in querys.iterrows():

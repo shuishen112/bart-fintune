@@ -1,14 +1,18 @@
 # 对wiki的结果进行评估
 
 import pandas as pd
+import torchtext
 from torch.utils.data import Dataset, DataLoader
 from nlp import Dataset as nlp_dataset
+from torchtext.data import get_tokenizer
 from gensim.utils import tokenize as gensim_tokenize
 import evaluation
 import argparse
 
 import pyterrier as pt
-pt.init(version = 5.5,helper_version = "0.0.6", home_dir = "/data/ceph/zhansu/data/msmarco") 
+# pt.init(version = 5.5,helper_version = "0.0.6", home_dir = "/data/ceph/zhansu/data/msmarco") 
+pt.init()
+
 
 # 载入wiki数据集
 
@@ -28,7 +32,7 @@ def remove_the_unanswered_sample(df):
     return df[df["Question"].isin(questions_have_correct) & df["Question"].isin(questions_have_uncorrect)].reset_index()
 def load_dataset(data_name):
     
-    train_data = pd.read_csv("/data/ceph/zhansu/data/WikiQACorpus/WikiQA-{}.tsv".format(data_name),sep = '\t',quoting = 3)
+    train_data = pd.read_csv("/data/zhansu/data/WikiQACorpus/WikiQA-{}.tsv".format(data_name),sep = '\t',quoting = 3)
     train_data = remove_the_unanswered_sample(train_data)
 
     train_qrel = train_data[['QuestionID',"SentenceID","Label"]]
@@ -43,7 +47,7 @@ def load_dataset(data_name):
     # 对query进行预处理
     def clean(row):
         text = row['query'].lower()
-        tokens = gensim_tokenize(text)
+        tokens = list(gensim_tokenize(text))
         text = " ".join(tokens)
         return text
 
@@ -66,8 +70,8 @@ textscorer = pt.batchretrieve.TextScorer(takes="docs", body_attr="text", wmodel=
 # print("train_map:{}".format(train_result))
 
 # 测试一下测试数据集的map
-res_test = textscorer.transform(test_data)
-test_result = pt.Utils.evaluate(res_test,test_qrel,metrics = ['map'])
+# res_test = textscorer.transform(test_data)
+# test_result = pt.Utils.evaluate(res_test,test_qrel,metrics = ['map'])
 
 # print("test_map:{}".format(test_result))
 
@@ -134,7 +138,7 @@ test_dataloader = DataLoader(test_dataset, batch_size = args.test_batch_size)
 
 def clean(text):
     text = text.lower()
-    tokens = gensim_tokenize(text)
+    tokens = list(gensim_tokenize(text))
     text = " ".join(tokens)
     return text
 def lmap(f, x):
@@ -154,6 +158,8 @@ qids = []
 docnos = []
 texts = []
 
+the_length_of_generation = 30
+
 for batch in test_dataloader:
 
     try:
@@ -162,7 +168,7 @@ for batch in test_dataloader:
                 batch["source_ids"],
                 attention_mask=batch["source_mask"],
                 use_cache=True,
-                max_length=15,
+                max_length=the_length_of_generation,
                 num_beams=2,
                 repetition_penalty=2.5,
                 length_penalty=1.0,
@@ -170,11 +176,11 @@ for batch in test_dataloader:
             )
         pred = ids_to_clean_text(generated_ids)
 
-        for i in range(len(batch)):
-            print("原始query",batch['input'][i])
-            print("重写query",pred[i])
+        # for i in range(len(batch)):
+        #     print("原始query",batch['input'][i])
+        #     print("重写query",pred[i])
 
-        print(["*"]*20)
+        # print(["*"]*20)
 
         original_querys.extend(batch['input'])
         query_rewrite.extend(pred)
@@ -186,14 +192,17 @@ for batch in test_dataloader:
 
 df_pred = pd.DataFrame({"qid":qids,"query_rewrite":query_rewrite,"original_querys":original_querys,"docno":docnos,"text":texts})
 
-# df_pred["merge_query"] = df_pred['original_querys'] + " " + df_pred["query_rewrite"]
+df_pred["merge_query"] = df_pred['original_querys'] + " " + df_pred["query_rewrite"]
 
 
 df_query_test_origin = df_pred[['qid',"original_querys","docno","text"]]
 
+df_query_test_origin.to_csv("original_query_{}.csv".format(the_length_of_generation),index = None)
 df_query_test_origin.columns = ['qid',"query","docno","text"]
 
-df_query_test_rewirte = df_pred[['qid',"query_rewrite","docno","text"]]
+df_query_test_rewirte = df_pred[['qid',"merge_query","docno","text"]]
+
+df_query_test_rewirte.to_csv("rewrite_query_{}.csv".format(the_length_of_generation),index = None)
 df_query_test_rewirte.columns = ['qid','query',"docno","text"]
 
 print(df_query_test_origin)
